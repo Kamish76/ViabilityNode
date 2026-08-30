@@ -1,70 +1,36 @@
-# ViabilityNode.dev
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-**ViabilityNode.dev** is an autonomous microclimate profiling platform and telemetry engine designed to evaluate plant viability prior to planting and monitor existing specimen health in real time.
+## Getting Started
 
----
+First, run the development server:
 
-## Architecture Overview
-
-```text
-+-------------------------------------------------------------+
-|                     HARDWARE SENSOR NODE                    |
-|  Seeed Studio XIAO ESP32-C6 (Deep Sleep 30m Duty Cycle)     |
-|  - VEML7700 (Light / DLI)                                   |
-|  - AHT20 + BMP280 (Temp, RH, Barometric Pressure)           |
-|  - Capacitive Soil Moisture v1.2 (Switched via GPIO D1)     |
-+------------------------------+------------------------------+
-| HTTP POST (JSON Payload)
-v
-+-------------------------------------------------------------+
-|                     NEXT.JS BACKEND                         |
-|  - Ingestion Route (/api/telemetry)                        |
-|  - Validation & Ingestion Handlers                          |
-+------------------------------+------------------------------+
-|
-v
-+-------------------------------------------------------------+
-|                     SUPABASE POSTGRESQL                     |
-|  - telemetry (Raw sensor time-series)                     |
-|  - telemetry_with_vpd (Calculated Vapor Pressure Deficit) |
-+-------------------------------------------------------------+
+```bash
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
 ```
 
----
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-## Key Analytics & Derived Metrics
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-The platform processes raw time-series telemetry into three predictive environmental indicators:
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-1. **Daily Light Integral (DLI):**
-   * Converts ambient illuminance ($\text{Lux} \to \text{PPFD}$) and integrates over 24-hour windows to classify zones for low-light foliage ($<5\ \text{mol/m}^2/\text{day}$), general tropicals ($5\text{--}15\ \text{mol/m}^2/\text{day}$), or high-light plants ($>15\ \text{mol/m}^2/\text{day}$).
-2. **Soil Drainage Velocity:**
-   * Tracks post-saturation moisture drop curves ($-\frac{\Delta \text{Moisture}}{\Delta \text{Time}}$) to identify hypoxic, slow-draining soil risk profiles versus rapid-draining zones.
-3. **Vapor Pressure Deficit (VPD):**
-   * Uses real-time temperature and relative humidity to measure transpiration potential, issuing early warnings for dehydration risk (high VPD) or stagnation/fungal infection danger (low VPD).
+## Learn More
 
----
+To learn more about Next.js, take a look at the following resources:
 
-## Ingest Payload Format
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 
-The ESP32 node transmits structured JSON to the `/api/telemetry` endpoint:
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-```json
-{
-  "device_id": "plant_node_01",
-  "illuminance_lux": 3491.02,
-  "temperature_c": 31.71,
-  "humidity_rh": 67.68,
-  "pressure_hpa": 1009.73,
-  "soil_moisture_raw": 1244
-}
-```
+## Deploy on Vercel
 
-## Tech Stack
-- **Framework**: Next.js (App Router, TypeScript)
-- **Database**: Supabase (PostgreSQL with time-series indexing and generated views)
-- **Hardware**: Seeed Studio XIAO ESP32-C6, VEML7700, AHT20, BMP280, Capacitive Soil Moisture Sensor v1.2  
-- **Styling/UI**: Tailwind CSS & Recharts
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
-## License
-MIT License.
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.

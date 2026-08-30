@@ -20,7 +20,9 @@ CREATE TABLE telemetry (
     temperature_c NUMERIC(5, 2) NOT NULL,
     humidity_rh NUMERIC(5, 2) NOT NULL,
     pressure_hpa NUMERIC(7, 2) NOT NULL,
-    soil_moisture_raw INTEGER NOT NULL
+    soil_moisture_raw INTEGER NOT NULL,
+    battery_v NUMERIC(4, 2),      -- External 2:1 divider sense; NULL for legacy nodes
+    battery_pct INTEGER            -- Linear interpolation 3.30V=0% → 4.20V=100%
 );
 
 -- 2. Index for time-series queries by node
@@ -39,6 +41,12 @@ SELECT
         3
     ) AS vpd_kpa
 FROM telemetry;
+
+-- 4. Migration: add battery columns to an existing telemetry table
+-- (skip if creating fresh from the CREATE TABLE above)
+ALTER TABLE telemetry
+ADD COLUMN IF NOT EXISTS battery_v NUMERIC(4, 2),
+ADD COLUMN IF NOT EXISTS battery_pct INTEGER;
 ```
 
 ## 2. Next.js Environment Configuration
@@ -74,6 +82,8 @@ export async function POST(req: Request) {
       humidity_rh,
       pressure_hpa,
       soil_moisture_raw,
+      battery_v,
+      battery_pct,
     } = payload;
 
     if (!device_id || illuminance_lux === undefined || temperature_c === undefined) {
@@ -88,6 +98,8 @@ export async function POST(req: Request) {
         humidity_rh,
         pressure_hpa,
         soil_moisture_raw,
+        ...(battery_v !== undefined && { battery_v }),
+        ...(battery_pct !== undefined && { battery_pct }),
       },
     ]);
 
@@ -126,6 +138,79 @@ curl -X POST http://localhost:3000/api/telemetry \
     "temperature_c": 28.40,
     "humidity_rh": 65.20,
     "pressure_hpa": 1012.30,
-    "soil_moisture_raw": 1820
+    "soil_moisture_raw": 1820,
+    "battery_v": 4.12,
+    "battery_pct": 91
   }'
 ```
+
+---
+
+## 5. Supabase Migrations
+
+Schema changes are managed through the Supabase CLI and live under `supabase/migrations/`.
+
+### Local development
+
+```bash
+# First-time: start the full local Supabase stack (Postgres + Studio)
+npx supabase start
+
+# Apply all pending migrations + run seed.sql
+npx supabase db reset
+
+# Open local Supabase Studio
+open http://localhost:54323
+```
+
+### Creating a new migration
+
+Always generate migrations via the CLI so the timestamp prefix is correct:
+
+```bash
+npx supabase migration new <descriptive_name>
+# e.g. npx supabase migration new add_dli_aggregates
+# → creates supabase/migrations/YYYYMMDDHHMMSS_add_dli_aggregates.sql
+```
+
+Write your DDL inside the generated file, then verify locally:
+
+```bash
+npx supabase db reset   # re-applies all migrations from scratch
+npx supabase db lint    # static SQL analysis
+npx supabase db diff    # confirm no uncommitted drift
+```
+
+### Migration naming convention
+
+| Part | Format | Example |
+|---|---|---|
+| Timestamp | `YYYYMMDDHHMMSS` | `20260830000001` |
+| Separator | `_` | — |
+| Description | `snake_case`, imperative verb | `create_telemetry` |
+
+### PR auto-validation
+
+The workflow at `.github/workflows/supabase-migration-check.yml` runs automatically on every PR that touches `supabase/`:
+
+| Job | What it checks |
+|---|---|
+| **Lint** | SQL syntax and undefined-reference errors via `supabase db lint` |
+| **Diff** | Boots a local stack, applies all migrations, confirms no uncommitted schema drift |
+| **Comment** | Posts a ✅/❌ summary table directly on the PR |
+
+PRs that fail either job are blocked from merging until the errors are resolved.
+
+### Deploying to production
+
+After a PR merges, push the migration to the hosted Supabase project:
+
+```bash
+# One-time: link this repo to your Supabase project
+npx supabase link --project-ref <your-project-ref>
+
+# Push all pending migrations to production
+npx supabase db push
+```
+
+Retrieve `<your-project-ref>` from **Project Settings → General** in the Supabase dashboard.

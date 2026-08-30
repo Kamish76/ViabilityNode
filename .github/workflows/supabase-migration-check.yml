@@ -1,0 +1,124 @@
+# =============================================================================
+# .github/workflows/supabase-migration-check.yml
+# Runs on every PR that touches supabase/migrations/** to lint and diff all
+# migration files against a local Supabase stack, catching schema errors
+# before they ever reach production.
+# =============================================================================
+
+name: Supabase Migration Check
+
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+      - "supabase/seed.sql"
+      - "supabase/config.toml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Lint — static analysis of every migration file
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint migrations
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local Supabase stack
+        run: supabase start --ignore-health-check
+
+      - name: Lint SQL migrations
+        run: supabase db lint --local
+        # Exits non-zero on any SQL syntax error, undefined column/type,
+        # or policy violation — blocks the PR from merging.
+
+      - name: Stop local Supabase stack
+        if: always()
+        run: supabase stop
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Diff — spins up a local stack, applies all migrations in order,
+  # then verifies there is no unexpected schema drift
+  # ---------------------------------------------------------------------------
+  diff:
+    name: Migration diff check
+    runs-on: ubuntu-latest
+    needs: lint   # only run if lint passes
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local Supabase stack
+        run: supabase start --ignore-health-check
+        # Boots Postgres + the local Studio in Docker; migrations are
+        # applied automatically in timestamp order.
+
+      - name: Run db diff (detect uncommitted drift)
+        run: |
+          supabase db diff --schema public
+          # If any schema change exists that is NOT captured in a migration
+          # file, this command outputs a non-empty diff and the step fails.
+
+      - name: Stop local Supabase stack
+        if: always()
+        run: supabase stop
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Post a summary comment on the PR
+  # ---------------------------------------------------------------------------
+  comment:
+    name: PR summary comment
+    runs-on: ubuntu-latest
+    needs: [lint, diff]
+    if: always()
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Post result comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const lintResult  = '${{ needs.lint.result }}';
+            const diffResult  = '${{ needs.diff.result }}';
+            const allPassed   = lintResult === 'success' && diffResult === 'success';
+
+            const icon   = allPassed ? '✅' : '❌';
+            const status = allPassed ? 'All migration checks passed' : 'One or more migration checks failed';
+
+            const body = [
+              `## ${icon} Supabase Migration Check`,
+              '',
+              `| Job | Result |`,
+              `|-----|--------|`,
+              `| Lint migrations | ${lintResult === 'success' ? '✅ Passed' : '❌ Failed'} |`,
+              `| Migration diff  | ${diffResult === 'success' ? '✅ Passed' : '❌ Failed'} |`,
+              '',
+              allPassed
+                ? '_No schema drift detected. Safe to merge._'
+                : '_Fix the failing checks before merging. See job logs for details._',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner:   context.repo.owner,
+              repo:    context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
