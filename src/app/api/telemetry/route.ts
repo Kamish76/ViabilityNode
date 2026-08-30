@@ -9,6 +9,8 @@ interface TelemetryPayload {
   humidity_rh: number;
   pressure_hpa: number;
   soil_moisture_raw: number;
+  battery_v?: number;    // External voltage-divider sense (2:1 ratio, 205kΩ+205kΩ)
+  battery_pct?: number;  // Linear interpolation: 3.30V=0% → 4.20V=100%
 }
 
 // ── POST /api/telemetry ───────────────────────────────────────────────────
@@ -24,6 +26,8 @@ export async function POST(req: Request) {
       humidity_rh,
       pressure_hpa,
       soil_moisture_raw,
+      battery_v,
+      battery_pct,
     } = payload;
 
     // ── Validation ─────────────────────────────────────────────────────────
@@ -50,6 +54,8 @@ export async function POST(req: Request) {
         humidity_rh,
         pressure_hpa,
         soil_moisture_raw,
+        ...(battery_v !== undefined && { battery_v }),
+        ...(battery_pct !== undefined && { battery_pct }),
       },
     ]);
 
