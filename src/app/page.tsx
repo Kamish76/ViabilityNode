@@ -49,7 +49,7 @@ export default async function DashboardPage() {
       .limit(50);
       
     if (fallbackError) {
-      console.error("Failed to fetch telemetry:", fallbackError);
+      console.error("Failed to fetch telemetry:", fallbackError?.message || fallbackError);
     } else {
       dataToUse = fallbackLogs as TelemetryData[];
     }
