@@ -35,10 +35,17 @@ jobs:
         with:
           version: latest
 
+      - name: Start local Supabase stack
+        run: supabase start --ignore-health-check
+
       - name: Lint SQL migrations
         run: supabase db lint --local
         # Exits non-zero on any SQL syntax error, undefined column/type,
         # or policy violation — blocks the PR from merging.
+
+      - name: Stop local Supabase stack
+        if: always()
+        run: supabase stop
 
   # ---------------------------------------------------------------------------
   # Job 2: Diff — spins up a local stack, applies all migrations in order,
