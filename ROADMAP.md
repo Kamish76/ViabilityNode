@@ -162,23 +162,23 @@ Requires **Phase 1 and Phase 2 to be fully complete.**
 
 Requires Phases 1–3 to be complete.
 
-- [ ] **Rot Warning** — Triggered when:
+- [x] **Rot Warning** — Triggered when:
   - Calibrated soil moisture remains flat near 100% for > 48–72 hours **AND**
   - VPD is chronically low (< 0.4 kPa)
   - Display: 🔴 Red alert banner
 
-- [ ] **Dehydration Warning** — Triggered when:
+- [x] **Dehydration Warning** — Triggered when:
   - Calibrated soil moisture drops below 10% **AND**
   - VPD is chronically high (> 1.5 kPa) for consecutive days
   - Display: 🟠 Orange alert banner
 
-- [ ] **Growth Optimization Status** — Illuminated green when:
+- [x] **Growth Optimization Status** — Illuminated green when:
   - Daily DLI is within the optimal range for the selected plant **AND**
   - Soil drainage is functioning properly **AND**
   - VPD is within the stable 0.8–1.2 kPa band
   - Display: 🟢 Green status indicator
 
-**Current state:** No alert logic or status indicators exist in the codebase.
+✅ **Implemented.** `ThreatAlertsPanel.tsx` evaluates all three threat conditions from live 30-day sensor history. Auto-expands rows with condition checklists and scientific explanations when active. AT RISK early-warning state fires when only one of two conditions is met.
 
 ---
 
