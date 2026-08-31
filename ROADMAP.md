@@ -10,6 +10,27 @@
 
 ---
 
+## ⚠️ Known Infrastructure Notes
+
+> These are confirmed production behaviours that must be kept in mind during all future phases.
+
+### Supabase RLS — Telemetry Table is Intentionally Unrestricted
+
+**Status:** Confirmed working configuration (as of 2026-08-31)
+
+The Supabase **`telemetry` table has RLS disabled / all policies removed.** This was the only configuration under which the real-time subscription (`postgres_changes` channel in `DashboardClient.tsx`) reliably delivered live inserts to the browser.
+
+- **Why:** Supabase Realtime respects RLS for `postgres_changes` events. If a row doesn't pass the policy for the requesting role (anon), the event is silently dropped — the subscription appears connected but no data arrives.
+- **Current state:** Table is fully open (no RLS policies). This is acceptable for a local/prototype deployment but **must be revisited before any public exposure.**
+- **Future fix options (when needed):**
+  - Add a permissive `SELECT` policy for the `anon` role on `telemetry`
+  - Or switch to using Supabase Realtime **Broadcast** / **Presence** channels (not RLS-gated) for the live feed
+  - Or proxy the real-time feed through a server-sent events (SSE) API route that uses the service-role key
+
+> **During Phase 3 & 4 development:** Do not add RLS policies back without also fixing the real-time subscription. If you do need to enable RLS, add the anon SELECT policy first and verify the live dashboard still updates before continuing.
+
+---
+
 ## Phase 1 — Calibration & Standardization (The Raw Baseline)
 
 > Goal: Turn raw sensor readings into real physical values before any advanced math is attempted.
@@ -117,8 +138,8 @@ Measure atmospheric drying power — the gap between current and maximum air moi
 
 Requires **Phase 1 and Phase 2 to be fully complete.**
 
-- [ ] Query 30-day averages for DLI, Drainage Velocity, and VPD from Supabase
-- [ ] Build a **Microclimate Profile Card** UI component displaying:
+- [x] Query 30-day averages for DLI, Drainage Velocity, and VPD from Supabase
+- [x] Build a **Microclimate Profile Card** UI component displaying:
 
   | Metric | 30-Day Avg | Classification |
   |--------|-----------|----------------|
@@ -126,12 +147,12 @@ Requires **Phase 1 and Phase 2 to be fully complete.**
   | Drainage (Soil Profile) | `slope %/hr` | Rapid / Moderate / Stagnant |
   | VPD (Transpiration Profile) | `x kPa` | Optimal / High Risk / Low Risk |
 
-- [ ] Map classifications to **plant matcher** suggestions (lookup table):
+- [x] Map classifications to **plant matcher** suggestions (lookup table):
   - Low DLI + Stagnant Drainage → Ferns, mosses
   - Moderate DLI + Moderate Drainage → Common houseplants
   - High DLI + Rapid Drainage → Cacti, succulents, fruit trees
 
-**Current state:** Not started. No 30-day aggregation queries or profile card component exist.
+✅ **Implemented.** `MicroclimatProfileCard.tsx` computes 30-day averages for DLI, VPD, and drainage. Full 12-combination plant lookup table (DLI × Drainage) with VPD risk modifier. Data maturity bar shows progress toward 30-day profile. Placed at the top of the Biophysical Analytics section.
 
 ---
 
@@ -141,23 +162,23 @@ Requires **Phase 1 and Phase 2 to be fully complete.**
 
 Requires Phases 1–3 to be complete.
 
-- [ ] **Rot Warning** — Triggered when:
+- [x] **Rot Warning** — Triggered when:
   - Calibrated soil moisture remains flat near 100% for > 48–72 hours **AND**
   - VPD is chronically low (< 0.4 kPa)
   - Display: 🔴 Red alert banner
 
-- [ ] **Dehydration Warning** — Triggered when:
+- [x] **Dehydration Warning** — Triggered when:
   - Calibrated soil moisture drops below 10% **AND**
   - VPD is chronically high (> 1.5 kPa) for consecutive days
   - Display: 🟠 Orange alert banner
 
-- [ ] **Growth Optimization Status** — Illuminated green when:
+- [x] **Growth Optimization Status** — Illuminated green when:
   - Daily DLI is within the optimal range for the selected plant **AND**
   - Soil drainage is functioning properly **AND**
   - VPD is within the stable 0.8–1.2 kPa band
   - Display: 🟢 Green status indicator
 
-**Current state:** No alert logic or status indicators exist in the codebase.
+✅ **Implemented.** `ThreatAlertsPanel.tsx` evaluates all three threat conditions from live 30-day sensor history. Auto-expands rows with condition checklists and scientific explanations when active. AT RISK early-warning state fires when only one of two conditions is met.
 
 ---
 
