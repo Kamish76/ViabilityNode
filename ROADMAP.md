@@ -56,17 +56,17 @@ Project how many **days remain** before the BMS trips its low-voltage cutout (~3
 
 Measure cumulative photon exposure per 24-hour cycle (unit: mol/m²/day).
 
-- [ ] Convert VEML7700 lux readings → PPFD (μmol/m²/s):
+- [x] Convert VEML7700 lux readings → PPFD (μmol/m²/s):
   ```
   PPFD = Lux × 0.0185   (sunlight coefficient; adjust for indoor LED if needed)
   ```
-- [ ] Integrate PPFD over each full 24-hour day:
+- [x] Integrate PPFD over each full 24-hour day:
   ```
   DLI (mol/m²/day) = Σ(PPFD × interval_seconds) ÷ 1,000,000
   ```
-- [ ] Implement as a Supabase SQL view or materialized view aggregating by calendar day
-- [ ] Build a **30-Day DLI chart** (Recharts BarChart or LineChart) in the frontend
-- [ ] Classify daily DLI:
+- [x] Implement as a Supabase SQL view or materialized view aggregating by calendar day
+- [x] Build a **30-Day DLI chart** (Recharts BarChart or LineChart) in the frontend
+- [x] Classify daily DLI:
   - `< 5 mol` → Low (shade / understory plants)
   - `5–15 mol` → Moderate (common houseplants)
   - `> 15 mol` → High (cacti, succulents, fruit trees)
@@ -79,16 +79,16 @@ Measure cumulative photon exposure per 24-hour cycle (unit: mol/m²/day).
 
 Measure how quickly the soil sheds excess water after a saturation event.
 
-- [ ] Detect a **saturation event**: soil moisture spikes rapidly to > 90%
-- [ ] Track the downward slope of moisture % over the subsequent 24–48 hours:
+- [x] Detect a **saturation event**: soil moisture spikes rapidly to > 90%
+- [x] Track the downward slope of moisture % over the subsequent 24–48 hours:
   ```
   Drainage Velocity = -ΔMoisture% / ΔTime(hours)
   ```
-- [ ] Categorize soil drainage:
+- [x] Categorize soil drainage:
   - **Rapid/Well-Draining** — fast slope (drought-tolerant plants: succulents, herbs)
   - **Moderate**
   - **Stagnant/Hypoxic** — flat slope (bog plants: mosses, ferns)
-- [ ] Display categorized drainage rating on the dashboard
+- [x] Display categorized drainage rating on the dashboard
 
 **Current state:** No soil drainage detection or slope calculation exists anywhere. Requires Phase 1.1 (calibrated moisture %) to be completed first.
 
@@ -99,10 +99,10 @@ Measure how quickly the soil sheds excess water after a saturation event.
 Measure atmospheric drying power — the gap between current and maximum air moisture capacity.
 
 - [/] **VPD is already calculated** via `calculateVPD()` in `DashboardClient.tsx` and displayed as an instantaneous card value
-- [ ] Confirm/verify the `telemetry_with_vpd` Supabase view is active and being queried by `page.tsx` (check migration files)
-- [ ] Build a **7-day rolling VPD average** calculation (query Supabase for last 7 days, average `vpd_kpa`)
-- [ ] Display the 7-day VPD trend as a line chart
-- [ ] Highlight "Danger Zone" time bands on the chart:
+- [x] Confirm/verify the `telemetry_with_vpd` Supabase view is active and being queried by `page.tsx` (check migration files)
+- [x] Build a **7-day rolling VPD average** calculation (query Supabase for last 7 days, average `vpd_kpa`)
+- [x] Display the 7-day VPD trend as a line chart
+- [x] Highlight "Danger Zone" time bands on the chart:
   - **Chronically High VPD** (> ~1.5 kPa) → atmospheric drought risk
   - **Chronically Low VPD** (< ~0.4 kPa) → fungal infection risk
   - **Optimal VPD** (0.8–1.2 kPa) → stable growth zone

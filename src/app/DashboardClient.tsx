@@ -17,6 +17,9 @@ import {
   Clock,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
+import { VPDChart, type VPDDataPoint } from "./components/VPDChart";
+import { DrainageCard, type DrainageInput } from "./components/DrainageCard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -315,9 +318,17 @@ function CalibrationModal({
 export function DashboardClient({
   initialLogs,
   batteryHistory,
+  dliHistory,
+  vpdHistory,
+  vpdRollingAvg,
+  moistureHistory,
 }: {
   initialLogs: TelemetryData[];
   batteryHistory: BatterySnapshot[];
+  dliHistory: DLIDataPoint[];
+  vpdHistory: VPDDataPoint[];
+  vpdRollingAvg: number | null;
+  moistureHistory: { recorded_at: string; soil_moisture_raw: number }[];
 }) {
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
   const [calibration, setCalibration] = useState<CalibrationConfig>(DEFAULT_CALIBRATION);
@@ -369,6 +380,12 @@ export function DashboardClient({
       : null;
 
   const batteryWarning = daysRemaining !== null && daysRemaining < 7;
+
+  // Phase 2.2: convert raw moisture history to calibrated % for drainage analysis
+  const drainageData: DrainageInput[] = moistureHistory.map((r) => ({
+    recorded_at: r.recorded_at,
+    moisture_pct: calculateMoisturePct(r.soil_moisture_raw, calibration),
+  }));
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-emerald-500/30 font-sans">
@@ -520,6 +537,31 @@ export function DashboardClient({
               >
                 Adjust
               </button>
+            </div>
+
+            {/* ════════════════════════════════════════
+                 PHASE 2 — Biophysical Analytics
+                ════════════════════════════════════════ */}
+            <div className="space-y-6">
+              <div className="flex items-center gap-3 pt-2">
+                <div className="h-px flex-1 bg-zinc-800" />
+                <span className="text-xs font-medium text-zinc-500 uppercase tracking-widest px-3">
+                  Biophysical Analytics
+                </span>
+                <div className="h-px flex-1 bg-zinc-800" />
+              </div>
+
+              {/* 2.1 — Daily Light Integral */}
+              <DLIChart data={dliHistory} />
+
+              {/* 2-col row: VPD trend + Drainage */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* 2.3 — VPD 7-day rolling */}
+                <VPDChart data={vpdHistory} rollingAvg={vpdRollingAvg} />
+
+                {/* 2.2 — Soil Drainage Velocity */}
+                <DrainageCard data={drainageData} />
+              </div>
             </div>
 
             {/* Log Table */}
