@@ -98,15 +98,16 @@ export default async function DashboardPage() {
     dliHistory = (dliRows ?? []) as DLIDataPoint[];
   }
 
-  // ── 4. Phase 2.3: VPD — 7-day readings for trend chart ───────────────────
-  let vpdHistory: VPDDataPoint[] = [];
+  // ── 4. Phase 2.3 + 3: VPD — 30-day readings (chart uses thinned 7-day subset)
+  // Fetch 30 days so Phase 3 profile card can compute a proper long-term average.
+  let vpdHistory30: VPDDataPoint[] = [];
   const { data: vpdRows, error: vpdError } = await supabaseAdmin
     .from("telemetry_with_vpd")
     .select("recorded_at, vpd_kpa")
-    .gte("recorded_at", sevenDaysAgo.toISOString())
+    .gte("recorded_at", thirtyDaysAgo.toISOString())
     .not("vpd_kpa", "is", null)
     .order("recorded_at", { ascending: true })
-    .limit(2000);
+    .limit(5000);
 
   if (vpdError) {
     // Compute VPD from raw temp + humidity
@@ -114,11 +115,11 @@ export default async function DashboardPage() {
     const { data: rawTH } = await supabaseAdmin
       .from("telemetry")
       .select("recorded_at, temperature_c, humidity_rh")
-      .gte("recorded_at", sevenDaysAgo.toISOString())
+      .gte("recorded_at", thirtyDaysAgo.toISOString())
       .order("recorded_at", { ascending: true })
-      .limit(2000);
+      .limit(5000);
 
-    vpdHistory = (rawTH ?? []).map((r) => {
+    vpdHistory30 = (rawTH ?? []).map((r) => {
       const temp = r.temperature_c as number;
       const rh   = r.humidity_rh as number;
       const eSat = 0.61078 * Math.exp((17.27 * temp) / (temp + 237.3));
@@ -128,29 +129,30 @@ export default async function DashboardPage() {
       };
     });
   } else {
-    vpdHistory = (vpdRows ?? []) as VPDDataPoint[];
+    vpdHistory30 = (vpdRows ?? []) as VPDDataPoint[];
   }
 
-  // Thin VPD dataset to ≤ 300 points for rendering performance
-  const thinFactor = Math.max(1, Math.floor(vpdHistory.length / 300));
-  const vpdThinned = vpdHistory.filter((_, i) => i % thinFactor === 0);
+  // Thin VPD to last 7 days, ≤ 300 points for the chart
+  const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const vpd7Day = vpdHistory30.filter(d => new Date(d.recorded_at).getTime() >= sevenDaysAgoMs);
+  const thinFactor = Math.max(1, Math.floor(vpd7Day.length / 300));
+  const vpdThinned = vpd7Day.filter((_, i) => i % thinFactor === 0);
 
-  // 7-day rolling avg
+  // 7-day avg for VPDChart badge
   const vpdRollingAvg =
     vpdThinned.length > 0
       ? vpdThinned.reduce((s, d) => s + d.vpd_kpa, 0) / vpdThinned.length
       : null;
 
-  // ── 5. Phase 2.2: Soil drainage — pass historical calibrated data ─────────
-  // We compute moisture_pct on the client using localStorage calibration.
-  // Pass raw telemetry rows (already fetched in step 1 + extended lookback)
-  // For a better slope analysis we fetch extra historical moisture data here.
+  // ── 5. Phase 2.2 + 3: Soil drainage — 30-day moisture history ───────────
+  // Extended to 30 days so the drainage slope and Phase 3 profile card can
+  // detect saturation events further back in time.
   const { data: moistureRows } = await supabaseAdmin
     .from("telemetry")
     .select("recorded_at, soil_moisture_raw")
-    .gte("recorded_at", sevenDaysAgo.toISOString())
+    .gte("recorded_at", thirtyDaysAgo.toISOString())
     .order("recorded_at", { ascending: true })
-    .limit(2000);
+    .limit(5000);
 
   const moistureHistory = (moistureRows ?? []).map((r) => ({
     recorded_at: r.recorded_at as string,
@@ -164,6 +166,7 @@ export default async function DashboardPage() {
       dliHistory={dliHistory}
       vpdHistory={vpdThinned}
       vpdRollingAvg={vpdRollingAvg}
+      vpdHistory30={vpdHistory30}
       moistureHistory={moistureHistory}
     />
   );

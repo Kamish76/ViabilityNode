@@ -10,6 +10,27 @@
 
 ---
 
+## ⚠️ Known Infrastructure Notes
+
+> These are confirmed production behaviours that must be kept in mind during all future phases.
+
+### Supabase RLS — Telemetry Table is Intentionally Unrestricted
+
+**Status:** Confirmed working configuration (as of 2026-08-31)
+
+The Supabase **`telemetry` table has RLS disabled / all policies removed.** This was the only configuration under which the real-time subscription (`postgres_changes` channel in `DashboardClient.tsx`) reliably delivered live inserts to the browser.
+
+- **Why:** Supabase Realtime respects RLS for `postgres_changes` events. If a row doesn't pass the policy for the requesting role (anon), the event is silently dropped — the subscription appears connected but no data arrives.
+- **Current state:** Table is fully open (no RLS policies). This is acceptable for a local/prototype deployment but **must be revisited before any public exposure.**
+- **Future fix options (when needed):**
+  - Add a permissive `SELECT` policy for the `anon` role on `telemetry`
+  - Or switch to using Supabase Realtime **Broadcast** / **Presence** channels (not RLS-gated) for the live feed
+  - Or proxy the real-time feed through a server-sent events (SSE) API route that uses the service-role key
+
+> **During Phase 3 & 4 development:** Do not add RLS policies back without also fixing the real-time subscription. If you do need to enable RLS, add the anon SELECT policy first and verify the live dashboard still updates before continuing.
+
+---
+
 ## Phase 1 — Calibration & Standardization (The Raw Baseline)
 
 > Goal: Turn raw sensor readings into real physical values before any advanced math is attempted.

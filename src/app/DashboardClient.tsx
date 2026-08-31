@@ -20,6 +20,7 @@ import { createClient } from "@/utils/supabase/client";
 import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
 import { VPDChart, type VPDDataPoint } from "./components/VPDChart";
 import { DrainageCard, type DrainageInput } from "./components/DrainageCard";
+import { MicroclimatProfileCard } from "./components/MicroclimatProfileCard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -321,6 +322,7 @@ export function DashboardClient({
   dliHistory,
   vpdHistory,
   vpdRollingAvg,
+  vpdHistory30,
   moistureHistory,
 }: {
   initialLogs: TelemetryData[];
@@ -328,6 +330,7 @@ export function DashboardClient({
   dliHistory: DLIDataPoint[];
   vpdHistory: VPDDataPoint[];
   vpdRollingAvg: number | null;
+  vpdHistory30: VPDDataPoint[];
   moistureHistory: { recorded_at: string; soil_moisture_raw: number }[];
 }) {
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
@@ -550,6 +553,13 @@ export function DashboardClient({
                 </span>
                 <div className="h-px flex-1 bg-zinc-800" />
               </div>
+
+              {/* 3.0 — Microclimate Profile Card (Phase 3) */}
+              <MicroclimatProfileCard
+                dliHistory={dliHistory}
+                vpdHistory30={vpdHistory30}
+                drainageData={drainageData}
+              />
 
               {/* 2.1 — Daily Light Integral */}
               <DLIChart data={dliHistory} />
