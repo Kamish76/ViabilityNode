@@ -21,6 +21,7 @@ import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
 import { VPDChart, type VPDDataPoint } from "./components/VPDChart";
 import { DrainageCard, type DrainageInput } from "./components/DrainageCard";
 import { MicroclimatProfileCard } from "./components/MicroclimatProfileCard";
+import { ThreatAlertsPanel } from "./components/ThreatAlertsPanel";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -559,6 +560,14 @@ export function DashboardClient({
                 dliHistory={dliHistory}
                 vpdHistory30={vpdHistory30}
                 drainageData={drainageData}
+              />
+
+              {/* 4.0 — Sitter Mode: Active Threat Alerts (Phase 4) */}
+              <ThreatAlertsPanel
+                drainageData={drainageData}
+                vpdHistory30={vpdHistory30}
+                dliHistory={dliHistory}
+                latestMoisture={moisturePct}
               />
 
               {/* 2.1 — Daily Light Integral */}
