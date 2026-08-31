@@ -138,8 +138,8 @@ Measure atmospheric drying power — the gap between current and maximum air moi
 
 Requires **Phase 1 and Phase 2 to be fully complete.**
 
-- [ ] Query 30-day averages for DLI, Drainage Velocity, and VPD from Supabase
-- [ ] Build a **Microclimate Profile Card** UI component displaying:
+- [x] Query 30-day averages for DLI, Drainage Velocity, and VPD from Supabase
+- [x] Build a **Microclimate Profile Card** UI component displaying:
 
   | Metric | 30-Day Avg | Classification |
   |--------|-----------|----------------|
@@ -147,12 +147,12 @@ Requires **Phase 1 and Phase 2 to be fully complete.**
   | Drainage (Soil Profile) | `slope %/hr` | Rapid / Moderate / Stagnant |
   | VPD (Transpiration Profile) | `x kPa` | Optimal / High Risk / Low Risk |
 
-- [ ] Map classifications to **plant matcher** suggestions (lookup table):
+- [x] Map classifications to **plant matcher** suggestions (lookup table):
   - Low DLI + Stagnant Drainage → Ferns, mosses
   - Moderate DLI + Moderate Drainage → Common houseplants
   - High DLI + Rapid Drainage → Cacti, succulents, fruit trees
 
-**Current state:** Not started. No 30-day aggregation queries or profile card component exist.
+✅ **Implemented.** `MicroclimatProfileCard.tsx` computes 30-day averages for DLI, VPD, and drainage. Full 12-combination plant lookup table (DLI × Drainage) with VPD risk modifier. Data maturity bar shows progress toward 30-day profile. Placed at the top of the Biophysical Analytics section.
 
 ---
 
