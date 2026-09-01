@@ -232,11 +232,14 @@ export function MicroclimatProfileCard({
   dliHistory,
   vpdHistory30,
   drainageData,
+  placementType,
 }: {
   dliHistory: DLIDataPoint[];
   vpdHistory30: VPDDataPoint[];
   drainageData: DrainageInput[];
+  placementType?: string | null;
 }) {
+  const isPot = placementType === "pot";
   const profile = computeProfile(dliHistory, vpdHistory30, drainageData);
   const suggestion = PLANT_LOOKUP[profile.dliClass][profile.drainClass];
   const vpdMod = VPD_MODIFIER[profile.vpdClass];
@@ -252,8 +255,18 @@ export function MicroclimatProfileCard({
             <Leaf className="w-5 h-5 text-emerald-400" />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-white">Microclimate Profile</h3>
-            <p className="text-xs text-zinc-500 mt-0.5">30-day environmental fingerprint · plant matcher</p>
+            <h3 className="text-base font-semibold text-white">
+              Microclimate Profile
+              {isPot && (
+                <span className="ml-2 text-xs font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full align-middle">
+                  🪴 Pot context
+                </span>
+              )}
+            </h3>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              30-day environmental fingerprint · plant matcher
+              {isPot && " · pot-adjusted thresholds"}
+            </p>
           </div>
         </div>
 
@@ -311,7 +324,10 @@ export function MicroclimatProfileCard({
         <MetricRow
           icon={<Droplets className="w-4 h-4 text-emerald-400" />}
           title="Drainage Velocity"
-          subtitle="Post-saturation moisture slope"
+          subtitle={isPot
+            ? "Pot drainage — rapid is expected, stagnant = check drainage holes"
+            : "Post-saturation moisture slope"
+          }
           value={profile.drainVelocity !== null ? profile.drainVelocity.toFixed(2) : "—"}
           unit="%/hr"
           meta={DRAIN_META[profile.drainClass]}
