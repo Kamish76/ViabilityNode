@@ -22,6 +22,8 @@ import { VPDChart, type VPDDataPoint } from "./components/VPDChart";
 import { DrainageCard, type DrainageInput } from "./components/DrainageCard";
 import { MicroclimatProfileCard } from "./components/MicroclimatProfileCard";
 import { ThreatAlertsPanel } from "./components/ThreatAlertsPanel";
+import { DeploymentPanel, type Deployment } from "./components/DeploymentPanel";
+import { TrialProgressCard } from "./components/TrialProgressCard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -325,6 +327,8 @@ export function DashboardClient({
   vpdRollingAvg,
   vpdHistory30,
   moistureHistory,
+  activeDeployment: initialActiveDeployment,
+  deploymentHistory: initialDeploymentHistory,
 }: {
   initialLogs: TelemetryData[];
   batteryHistory: BatterySnapshot[];
@@ -333,10 +337,14 @@ export function DashboardClient({
   vpdRollingAvg: number | null;
   vpdHistory30: VPDDataPoint[];
   moistureHistory: { recorded_at: string; soil_moisture_raw: number }[];
+  activeDeployment: Deployment | null;
+  deploymentHistory: Deployment[];
 }) {
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
   const [calibration, setCalibration] = useState<CalibrationConfig>(DEFAULT_CALIBRATION);
   const [showCalibration, setShowCalibration] = useState(false);
+  const [currentDeployment, setCurrentDeployment] = useState<Deployment | null>(initialActiveDeployment);
+  const [allDeployments, setAllDeployments] = useState<Deployment[]>(initialDeploymentHistory);
   const supabase = createClient();
 
   // Load calibration from localStorage on mount (client-only)
@@ -387,6 +395,29 @@ export function DashboardClient({
 
   // Phase 2.2: convert raw moisture history to calibrated % for drainage analysis
   const drainageData: DrainageInput[] = moistureHistory.map((r) => ({
+    recorded_at: r.recorded_at,
+    moisture_pct: calculateMoisturePct(r.soil_moisture_raw, calibration),
+  }));
+
+  // Deployment management
+  const handleDeploymentCreated = useCallback((d: Deployment) => {
+    // The new deployment is now active; the old one was auto-ended by the API
+    setCurrentDeployment(d);
+    setAllDeployments((prev) => {
+      // Mark the previously-active deployment as ended
+      const updated = prev.map((existing) =>
+        existing.ended_at === null && existing.id !== d.id
+          ? { ...existing, ended_at: new Date().toISOString() }
+          : existing
+      );
+      return [d, ...updated];
+    });
+  }, []);
+
+  const placementType = currentDeployment?.placement_type ?? null;
+
+  // Calibrated moisture for the TrialProgressCard
+  const calibratedMoistureHistory = moistureHistory.map((r) => ({
     recorded_at: r.recorded_at,
     moisture_pct: calculateMoisturePct(r.soil_moisture_raw, calibration),
   }));
@@ -460,8 +491,7 @@ export function DashboardClient({
         ) : (
           <div className="space-y-8">
 
-            {/* Battery warning banner */}
-            {batteryWarning && (
+            {latest?.battery_pct != null && batteryWarning && (
               <div className="flex items-center gap-3 px-5 py-3.5 rounded-2xl bg-orange-500/10 border border-orange-500/30">
                 <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0" />
                 <p className="text-sm text-orange-300">
@@ -470,6 +500,28 @@ export function DashboardClient({
                   remaining before BMS cutout. Consider recharging.
                 </p>
               </div>
+            )}
+
+            {/* Deployment Panel */}
+            {latest && (
+              <DeploymentPanel
+                activeDeployment={currentDeployment}
+                deploymentHistory={allDeployments}
+                deviceId={latest.device_id}
+                onDeploymentCreated={handleDeploymentCreated}
+              />
+            )}
+
+            {/* Trial Progress Card */}
+            {currentDeployment && (
+              <TrialProgressCard
+                deployment={currentDeployment}
+                daysRemaining={daysRemaining}
+                currentBatteryPct={latest?.battery_pct ?? null}
+                dliHistory={dliHistory}
+                vpdHistory30={vpdHistory30}
+                moistureHistory={calibratedMoistureHistory}
+              />
             )}
 
             {/* Metrics Grid */}
@@ -560,6 +612,7 @@ export function DashboardClient({
                 dliHistory={dliHistory}
                 vpdHistory30={vpdHistory30}
                 drainageData={drainageData}
+                placementType={placementType}
               />
 
               {/* 4.0 — Sitter Mode: Active Threat Alerts (Phase 4) */}
@@ -568,6 +621,7 @@ export function DashboardClient({
                 vpdHistory30={vpdHistory30}
                 dliHistory={dliHistory}
                 latestMoisture={moisturePct}
+                placementType={placementType}
               />
 
               {/* 2.1 — Daily Light Integral */}

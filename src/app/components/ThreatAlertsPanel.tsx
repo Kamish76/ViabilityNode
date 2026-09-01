@@ -74,14 +74,19 @@ function evalRotWarning(
   drainageData: DrainageInput[],
   vpdHistory: VPDDataPoint[],
   latestMoisture: number | null,
+  isPot: boolean,
 ): ThreatResult {
-  const moisture72h = recentMoistureStats(drainageData, 72);
+  // Pots trap moisture in a smaller volume → rot develops faster
+  const satThreshold = isPot ? 75 : 85;
+  const flatThreshold = isPot ? 6 : 8;
+  const windowHours = isPot ? 48 : 72;
+  const moisture = recentMoistureStats(drainageData, windowHours);
   const vpd48hAvg   = recentVpdAvg(vpdHistory, 48);
 
   const highAndFlat =
-    moisture72h !== null &&
-    moisture72h.avg >= 85 &&
-    moisture72h.stdDev < 8;               // flat = little variation
+    moisture !== null &&
+    moisture.avg >= satThreshold &&
+    moisture.stdDev < flatThreshold;        // flat = little variation
 
   const lowVPD = vpd48hAvg !== null && vpd48hAvg < 0.4;
 
@@ -101,9 +106,11 @@ function evalRotWarning(
     detail: "Root rot triggers when soil stays saturated (no oxygen replenishment) while chronically low VPD prevents the plant from transpiring water upward. Both conditions must persist simultaneously.",
     conditions: [
       {
-        label: "Soil ≥ 85% moisture, flat for 72h",
+        label: isPot
+          ? `Soil ≥ ${satThreshold}% moisture, flat for ${windowHours}h (pot-adjusted)`
+          : "Soil ≥ 85% moisture, flat for 72h",
         met:   highAndFlat,
-        value: moisture72h ? `avg ${moisture72h.avg.toFixed(1)}% · σ ${moisture72h.stdDev.toFixed(1)}%` : "Insufficient data",
+        value: moisture ? `avg ${moisture.avg.toFixed(1)}% · σ ${moisture.stdDev.toFixed(1)}%` : "Insufficient data",
       },
       {
         label: "48h VPD < 0.4 kPa (stagnant air)",
@@ -118,8 +125,11 @@ function evalDehydrationWarning(
   drainageData: DrainageInput[],
   vpdHistory: VPDDataPoint[],
   latestMoisture: number | null,
+  isPot: boolean,
 ): ThreatResult {
-  const isDry   = latestMoisture !== null && latestMoisture < 15;
+  // Pots dry out faster → trigger earlier
+  const dryThreshold = isPot ? 20 : 15;
+  const isDry   = latestMoisture !== null && latestMoisture < dryThreshold;
   const vpd7d   = recentVpdAvg(vpdHistory, 7 * 24);
   const highVPD = vpd7d !== null && vpd7d > 1.5;
 
@@ -139,7 +149,9 @@ function evalDehydrationWarning(
     detail: "Dehydration stress occurs when soil water reserves are depleted (low moisture) while high VPD drives rapid transpiration from leaves faster than roots can supply. Stomata close, halting photosynthesis.",
     conditions: [
       {
-        label: "Current soil moisture < 15%",
+        label: isPot
+          ? `Current soil moisture < ${dryThreshold}% (pot-adjusted, dries faster)`
+          : "Current soil moisture < 15%",
         met:   isDry,
         value: latestMoisture !== null ? `${latestMoisture.toFixed(1)}%` : "No reading",
       },
@@ -330,14 +342,17 @@ export function ThreatAlertsPanel({
   vpdHistory30,
   dliHistory,
   latestMoisture,
+  placementType,
 }: {
   drainageData:   DrainageInput[];
   vpdHistory30:   VPDDataPoint[];
   dliHistory:     DLIDataPoint[];
   latestMoisture: number | null;
+  placementType?: string | null;
 }) {
-  const rot          = evalRotWarning(drainageData, vpdHistory30, latestMoisture);
-  const dehydration  = evalDehydrationWarning(drainageData, vpdHistory30, latestMoisture);
+  const isPot = placementType === "pot";
+  const rot          = evalRotWarning(drainageData, vpdHistory30, latestMoisture, isPot);
+  const dehydration  = evalDehydrationWarning(drainageData, vpdHistory30, latestMoisture, isPot);
   const growth       = evalGrowthOptimization(dliHistory, drainageData, vpdHistory30);
 
   const hasActive  = rot.status === "active"    || dehydration.status === "active";
@@ -398,6 +413,11 @@ export function ThreatAlertsPanel({
         <p className="text-xs text-zinc-600 leading-relaxed">
           Threat detection uses the past 48–72h of sensor data. Alerts expand automatically when conditions are met.
           All thresholds assume calibrated soil moisture — verify calibration before relying on these readings.
+          {isPot && (
+            <span className="text-amber-500/70">
+              {" "}🪴 Pot-adjusted thresholds are active: rot triggers at lower saturation and shorter duration; dehydration triggers earlier due to smaller soil volume.
+            </span>
+          )}
         </p>
       </div>
     </div>
