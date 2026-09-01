@@ -2,6 +2,9 @@
 
 **Real-time plant telemetry dashboard** — the web-facing component of the Plant Surrogate Monitoring System.
 
+> **Current Status**: 🚀 **Deployed & Monitoring**
+> The node has just been deployed and is currently in a testing phase to observe long-term viability and stability over time. Since it is a simple sensor module, current efforts are focused on monitoring telemetry data and observing if any adjustments or enhancements are needed to maximize utility.
+
 ViabilityNode ingests sensor data pushed over Wi-Fi from an **ESP32-C6** surrogate node and displays it in a live dashboard. It exposes a REST API endpoint for the firmware to POST telemetry into, persists all records in **Supabase**, and renders the latest readings with historical logs.
 
 ---

@@ -2,6 +2,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { DashboardClient, TelemetryData, BatterySnapshot } from "./DashboardClient";
 import type { DLIDataPoint } from "./components/DLIChart";
 import type { VPDDataPoint } from "./components/VPDChart";
+import type { Deployment } from "./components/DeploymentPanel";
 
 // Opt out of static rendering so we fetch fresh data on reload
 export const dynamic = "force-dynamic";
@@ -159,6 +160,29 @@ export default async function DashboardPage() {
     soil_moisture_raw: r.soil_moisture_raw as number,
   }));
 
+  // ── 6. Deployment tracking — active deployment + history ─────────────────
+  // Determine device_id from the most recent telemetry record
+  const deviceId = dataToUse?.[0]?.device_id ?? null;
+
+  let activeDeployment: Deployment | null = null;
+  let deploymentHistory: Deployment[] = [];
+
+  if (deviceId) {
+    // Fetch all deployments for this device (active first)
+    const { data: deploymentRows, error: deploymentError } = await supabaseAdmin
+      .from("node_deployments")
+      .select("*")
+      .eq("device_id", deviceId)
+      .order("started_at", { ascending: false });
+
+    if (deploymentError) {
+      console.warn("node_deployments table not found or error:", deploymentError.message);
+    } else {
+      deploymentHistory = (deploymentRows ?? []) as Deployment[];
+      activeDeployment = deploymentHistory.find((d) => d.ended_at === null) ?? null;
+    }
+  }
+
   return (
     <DashboardClient
       initialLogs={dataToUse ?? []}
@@ -168,6 +192,8 @@ export default async function DashboardPage() {
       vpdRollingAvg={vpdRollingAvg}
       vpdHistory30={vpdHistory30}
       moistureHistory={moistureHistory}
+      activeDeployment={activeDeployment}
+      deploymentHistory={deploymentHistory}
     />
   );
 }
