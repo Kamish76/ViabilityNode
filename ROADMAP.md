@@ -216,3 +216,42 @@ When starting a new dev session on ViabilityNode:
 3. Update statuses: `[ ]` → `[/]` (in progress) or `[x]` (done)
 4. Pick the **next unblocked item** in the dependency chain and implement it
 5. Commit with a note referencing the roadmap item number (e.g. `feat: Phase 1.1 soil moisture calibration`)
+
+---
+
+## Future Improvements Roadmap (Long-Term)
+
+That is a very smart approach. When you're building an IoT project solo, prioritizing a stable physical deployment first is 100% the right engineering decision. Getting the hardware into the dirt, ensuring the 30-minute deep sleep loop is rock-solid, and letting the node build up a high-quality "historical baseline" gives you the raw dataset you need before you start writing complex cloud logic.
+
+Here is a structured, phased roadmap to transition your project from a passive data harvester (now) into an intelligent predictive agritech system (future) as you invest more time into it:
+
+### Phase 1: Immediate Deployment & Harvesting (The "Hands-Off" Baseline)
+**Your Goal Right Now:** Collect a pristine, uninterrupted 30-day environmental footprint.
+- **Physical Placement:** Secure your node in your chosen succulent pot or flower bed. Ensure the louvered Stevenson balcony is facing away from direct daytime solar baking, and the VEML7700 light sensor has a clear, unobstructed sky view.
+- **Calibrate the Ground Truth:** Keep an eye on your raw soil moisture ADC readings. Take note of what the sensor reads right before you water the plant (your dry threshold) and what it reads 10 minutes after a deep watering (your wet threshold). Save these values in your dashboard config.
+- **Manual Event Logging:** To help validate your future analytics, manually note down major events (e.g., when you water the plant, when a heavy storm hits Tacloban, or if you temporarily move the pot).
+
+### Phase 2: Cloud Ingestion & Weather Forecasts (The "Smart Companion" Phase)
+**The Goal:** Add predictive weather alerts without changing your node's firmware or consuming any extra battery power.
+- **Select a Weather API:** Sign up for a free tier of a service like OpenWeatherMap or WeatherAPI.
+- **Serverless Ingestion Route:** Write a simple Next.js API route (e.g., `/api/fetch-forecast`). Since Next.js runs on the server, you can securely call your weather API using a private API key.
+- **Supabase Integration:**
+  - Create a `weather_forecasts` table in Supabase.
+  - Have your Next.js serverless function read the latitude and longitude from your `nodes_metadata` table, fetch the local 3-day forecast, and store it in your database.
+  - Set up a simple cron job (via Supabase's built-in pg_cron or a free service like GitHub Actions) to trigger this fetch twice a day (e.g., at 6:00 AM and 6:00 PM).
+- **Frontend Enhancements:** Add an "Upcoming Weather" card to your dashboard. Overlay expected rain times on top of your live soil moisture charts to visually signal when to skip manual watering.
+
+### Phase 3: Astronomical Solar Position & Shadows (The "Obstruction Detector")
+**The Goal:** Use astronomical math to diagnose if your plant is sitting in a "shadow trap."
+- **Incorporate Solar Library:** Install a lightweight math package like `suncalc` in your Next.js project.
+- **Theoretical Max DLI:** Based on your location's coordinates and the day of the year, calculate the theoretical maximum hours of sunlight the node should be receiving if there were zero trees, walls, or roofs in the way.
+- **Automated Shadow Flagging:** Write a backend view to compare actual VEML7700 Lux readings against theoretical daylight hours. If the sun is mathematically 30 degrees above the horizon but your node is logging 0 Lux, flag that specific time window as a "Local Obstruction/Shadow Zone."
+- **Visual Charting:** Draw a beautiful "Sun Path vs. Actual Light" chart on your dashboard, showing the user exactly what hours of the day their plant is being starved of light by a wall or building.
+
+### Phase 4: Fully Dynamic Botanical Database (The "Automated Matcher")
+**The Goal:** Turn your platform into an autonomous horticultural consultant.
+- **Connect to a Botanical API:** Integrate your Next.js backend with an open plant data API (such as the Trefle API or a curated local database of tropical and succulent species).
+- **Environmental Profile Generation:** At the end of a 30-day trial, have a database script compile your node's actual 24-Hour DLI Average, Soil Drainage Class, and Average VPD Range into a single JSON profile signature.
+- **The Matching Engine:** Run an automated search against your botanical database:
+  - **Query:** Find plants that require Light [Your DLI Class] + Soil Drainage [Your Drainage Speed] + Humidity [Your VPD Class].
+  - **Result:** Display a list of 5 matched species that are biologically guaranteed to thrive in that exact spot, along with their difficulty ratings and watering instructions.
