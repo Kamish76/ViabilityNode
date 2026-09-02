@@ -24,6 +24,8 @@ import { MicroclimatProfileCard } from "./components/MicroclimatProfileCard";
 import { ThreatAlertsPanel } from "./components/ThreatAlertsPanel";
 import { DeploymentPanel, type Deployment } from "./components/DeploymentPanel";
 import { TrialProgressCard } from "./components/TrialProgressCard";
+import { SideNav } from "./components/SideNav";
+import { SummaryDashboard, type DailySummaryData } from "./components/SummaryDashboard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -329,6 +331,7 @@ export function DashboardClient({
   moistureHistory,
   activeDeployment: initialActiveDeployment,
   deploymentHistory: initialDeploymentHistory,
+  dailySummary,
 }: {
   initialLogs: TelemetryData[];
   batteryHistory: BatterySnapshot[];
@@ -339,6 +342,7 @@ export function DashboardClient({
   moistureHistory: { recorded_at: string; soil_moisture_raw: number }[];
   activeDeployment: Deployment | null;
   deploymentHistory: Deployment[];
+  dailySummary: DailySummaryData;
 }) {
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
   const [calibration, setCalibration] = useState<CalibrationConfig>(DEFAULT_CALIBRATION);
@@ -440,7 +444,10 @@ export function DashboardClient({
         />
       )}
 
-      <main className="max-w-6xl mx-auto px-6 py-12 md:py-20">
+      {/* Navigation */}
+      <SideNav />
+
+      <main className="flex-1 max-w-6xl mx-auto px-6 py-12 md:py-20 lg:pl-[280px] pb-32 lg:pb-20 transition-all duration-300">
 
         {/* Header */}
         <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
@@ -489,7 +496,8 @@ export function DashboardClient({
             </p>
           </div>
         ) : (
-          <div className="space-y-8">
+          <div className="space-y-12">
+            <SummaryDashboard data={dailySummary} />
 
             {latest?.battery_pct != null && batteryWarning && (
               <div className="flex items-center gap-3 px-5 py-3.5 rounded-2xl bg-orange-500/10 border border-orange-500/30">
@@ -514,18 +522,21 @@ export function DashboardClient({
 
             {/* Trial Progress Card */}
             {currentDeployment && (
-              <TrialProgressCard
-                deployment={currentDeployment}
-                daysRemaining={daysRemaining}
-                currentBatteryPct={latest?.battery_pct ?? null}
-                dliHistory={dliHistory}
-                vpdHistory30={vpdHistory30}
-                moistureHistory={calibratedMoistureHistory}
-              />
+              <div id="trial-progress" className="scroll-mt-32">
+                <TrialProgressCard
+                  deployment={currentDeployment}
+                  daysRemaining={daysRemaining}
+                  currentBatteryPct={latest?.battery_pct ?? null}
+                  dliHistory={dliHistory}
+                  vpdHistory30={vpdHistory30}
+                  moistureHistory={calibratedMoistureHistory}
+                />
+              </div>
             )}
 
             {/* Metrics Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+            <div id="live-metrics" className="scroll-mt-32">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
 
               <MetricCard
                 title="Temperature"
@@ -575,6 +586,7 @@ export function DashboardClient({
               />
 
             </div>
+            </div>
 
             {/* Calibration info strip */}
             <div className="flex items-center justify-between px-5 py-3 rounded-2xl bg-zinc-900/60 border border-zinc-800/60 text-xs text-zinc-500">
@@ -598,7 +610,7 @@ export function DashboardClient({
             {/* ════════════════════════════════════════
                  PHASE 2 — Biophysical Analytics
                 ════════════════════════════════════════ */}
-            <div className="space-y-6">
+            <div id="analytics" className="space-y-6 scroll-mt-32">
               <div className="flex items-center gap-3 pt-2">
                 <div className="h-px flex-1 bg-zinc-800" />
                 <span className="text-xs font-medium text-zinc-500 uppercase tracking-widest px-3">
@@ -638,7 +650,7 @@ export function DashboardClient({
             </div>
 
             {/* Log Table */}
-            <div className="mt-4 rounded-3xl border border-zinc-800/80 bg-zinc-900/40 backdrop-blur-xl overflow-hidden shadow-2xl">
+            <div id="live-logs" className="mt-4 rounded-3xl border border-zinc-800/80 bg-zinc-900/40 backdrop-blur-xl overflow-hidden shadow-2xl scroll-mt-32">
               <div className="px-6 py-5 border-b border-zinc-800">
                 <h3 className="text-lg font-medium text-white flex items-center gap-2">
                   <Activity className="w-5 h-5 text-zinc-400" />

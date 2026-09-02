@@ -9,6 +9,56 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
 
+  // ── 0. Daily Summary Data (Current vs Previous Day) ───────────────
+  const fortyEightHoursAgo = new Date();
+  fortyEightHoursAgo.setDate(fortyEightHoursAgo.getDate() - 2);
+  
+  const { data: recentTelemetry } = await supabaseAdmin
+    .from("telemetry")
+    .select("recorded_at, temperature_c, humidity_rh, illuminance_lux, soil_moisture_raw")
+    .gte("recorded_at", fortyEightHoursAgo.toISOString())
+    .order("recorded_at", { ascending: false });
+
+  let currentSummary = null;
+  let previousSummary = null;
+
+  if (recentTelemetry && recentTelemetry.length > 0) {
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+    const todayRows = recentTelemetry.filter(r => (r.recorded_at as string).startsWith(todayStr));
+    const yesterdayRows = recentTelemetry.filter(r => (r.recorded_at as string).startsWith(yesterdayStr));
+
+    const computeAvg = (rows: any[]) => {
+      if (rows.length === 0) return null;
+      let temp = 0, hum = 0, vpd = 0, lux = 0, moisture = 0;
+      for (const r of rows) {
+        temp += r.temperature_c as number;
+        hum += r.humidity_rh as number;
+        lux += r.illuminance_lux as number;
+        moisture += r.soil_moisture_raw as number;
+        const eSat = 0.61078 * Math.exp((17.27 * r.temperature_c) / (r.temperature_c + 237.3));
+        vpd += eSat * (1 - r.humidity_rh / 100);
+      }
+      return {
+        temp: temp / rows.length,
+        humidity: hum / rows.length,
+        vpd: vpd / rows.length,
+        light: lux / rows.length,
+        moistureRaw: moisture / rows.length,
+      };
+    };
+
+    currentSummary = computeAvg(todayRows);
+    previousSummary = computeAvg(yesterdayRows);
+  }
+  
+  const dailySummary = { current: currentSummary, previous: previousSummary };
+
+
   // ── 1. Latest 50 telemetry records (with VPD) ─────────────────────────────
   const { data: logs, error } = await supabaseAdmin
     .from("telemetry_with_vpd")
@@ -194,6 +244,7 @@ export default async function DashboardPage() {
       moistureHistory={moistureHistory}
       activeDeployment={activeDeployment}
       deploymentHistory={deploymentHistory}
+      dailySummary={dailySummary}
     />
   );
 }
