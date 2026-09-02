@@ -7,7 +7,7 @@ import type { DrainageInput } from "./DrainageCard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type AlertStatus = "active" | "at-risk" | "clear" | "monitoring";
+export type AlertStatus = "active" | "at-risk" | "clear" | "monitoring";
 
 interface ThreatResult {
   status:      AlertStatus;
@@ -70,7 +70,7 @@ function drainageVelocity(drainageData: DrainageInput[]): number | null {
 
 // ─── Alert evaluation ─────────────────────────────────────────────────────────
 
-function evalRotWarning(
+export function evalRotWarning(
   drainageData: DrainageInput[],
   vpdHistory: VPDDataPoint[],
   latestMoisture: number | null,
@@ -132,7 +132,7 @@ function evalRotWarning(
   };
 }
 
-function evalDehydrationWarning(
+export function evalDehydrationWarning(
   drainageData: DrainageInput[],
   vpdHistory: VPDDataPoint[],
   latestMoisture: number | null,
@@ -188,7 +188,7 @@ function evalDehydrationWarning(
   };
 }
 
-function evalGrowthOptimization(
+export function evalGrowthOptimization(
   dliHistory: DLIDataPoint[],
   drainageData: DrainageInput[],
   vpdHistory: VPDDataPoint[],

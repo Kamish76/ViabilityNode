@@ -13,7 +13,15 @@ export interface DailySummaryData {
   previous: DaySummary | null;
 }
 
-export function SummaryDashboard({ data }: { data: DailySummaryData }) {
+export function SummaryDashboard({ 
+  data,
+  viabilityStatus,
+  plantType 
+}: { 
+  data: DailySummaryData;
+  viabilityStatus?: "optimal" | "warning" | "critical" | "monitoring" | null;
+  plantType?: string | null;
+}) {
   if (!data.current) return null;
 
   const calculateTrend = (current: number, previous: number | null) => {
@@ -80,9 +88,38 @@ export function SummaryDashboard({ data }: { data: DailySummaryData }) {
             Current day averages vs. previous day
           </p>
         </div>
-        <div className="mt-4 md:mt-0 flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-sm font-medium text-emerald-400">Environment Active</span>
+        <div className="mt-4 md:mt-0 flex items-center gap-2">
+          {viabilityStatus ? (
+            <div className={`flex items-center gap-2 px-4 py-2 rounded-full border ${
+              viabilityStatus === 'optimal' ? 'bg-emerald-500/10 border-emerald-500/20' :
+              viabilityStatus === 'warning' ? 'bg-orange-500/10 border-orange-500/20' :
+              viabilityStatus === 'critical' ? 'bg-red-500/10 border-red-500/20' :
+              'bg-zinc-800/60 border-zinc-700/40'
+            }`}>
+              <div className={`w-2 h-2 rounded-full animate-pulse ${
+                viabilityStatus === 'optimal' ? 'bg-emerald-500' :
+                viabilityStatus === 'warning' ? 'bg-orange-500' :
+                viabilityStatus === 'critical' ? 'bg-red-500' :
+                'bg-zinc-500'
+              }`} />
+              <span className={`text-sm font-semibold tracking-wide ${
+                viabilityStatus === 'optimal' ? 'text-emerald-400' :
+                viabilityStatus === 'warning' ? 'text-orange-400' :
+                viabilityStatus === 'critical' ? 'text-red-400' :
+                'text-zinc-400'
+              }`}>
+                {viabilityStatus === 'optimal' ? `Optimal for ${plantType || 'Plant'}` :
+                 viabilityStatus === 'warning' ? `At Risk (${plantType || 'Plant'})` :
+                 viabilityStatus === 'critical' ? `Critical Threat (${plantType || 'Plant'})` :
+                 'Monitoring Environment'}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-sm font-medium text-emerald-400">Environment Active</span>
+            </div>
+          )}
         </div>
       </div>
 
