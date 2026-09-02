@@ -5,8 +5,8 @@ import { LayoutDashboard, Activity, FlaskConical, LineChart, ListTree } from "lu
 
 const navItems = [
   { id: "summary", label: "Summary", icon: LayoutDashboard },
-  { id: "live-metrics", label: "Live Metrics", icon: Activity },
   { id: "trial-progress", label: "Trial Progress", icon: FlaskConical },
+  { id: "live-metrics", label: "Live Metrics", icon: Activity },
   { id: "analytics", label: "Analytics", icon: LineChart },
   { id: "live-logs", label: "Logs", icon: ListTree },
 ];
