@@ -522,11 +522,24 @@ export function DashboardClient({
           </div>
         ) : (
           <div className="space-y-16 lg:space-y-24">
-            <SummaryDashboard 
-              data={dailySummary} 
-              viabilityStatus={viabilityStatus}
-              plantType={currentPlantType}
-            />
+            <div className="space-y-6">
+              <SummaryDashboard 
+                data={dailySummary} 
+                viabilityStatus={viabilityStatus}
+                plantType={currentPlantType}
+              />
+
+              {/* Sitter Mode: Active Threat Alerts */}
+              <ThreatAlertsPanel
+                drainageData={drainageData}
+                vpdHistory30={vpdHistory30}
+                dliHistory={dliHistory}
+                latestMoisture={moisturePct}
+                logs={logs}
+                placementType={placementType}
+                plantType={currentDeployment?.plant_type || null}
+              />
+            </div>
 
             {latest?.battery_pct != null && batteryWarning && (
               <div className="flex items-center gap-3 px-5 py-3.5 rounded-2xl bg-orange-500/10 border border-orange-500/30">
@@ -655,17 +668,6 @@ export function DashboardClient({
                 vpdHistory30={vpdHistory30}
                 drainageData={drainageData}
                 placementType={placementType}
-              />
-
-              {/* 4.0 — Sitter Mode: Active Threat Alerts (Phase 4) */}
-              <ThreatAlertsPanel
-                drainageData={drainageData}
-                vpdHistory30={vpdHistory30}
-                dliHistory={dliHistory}
-                latestMoisture={moisturePct}
-                logs={logs}
-                placementType={placementType}
-                plantType={currentDeployment?.plant_type || null}
               />
 
               {/* 2.1 — Daily Light Integral */}

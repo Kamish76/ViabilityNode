@@ -470,7 +470,7 @@ export function ThreatAlertsPanel({
   const isOptimal  = growth.status === "active";
 
   return (
-    <div className="rounded-3xl border border-zinc-700/60 bg-zinc-900/40 backdrop-blur-xl shadow-2xl overflow-hidden">
+    <div id="sitter-mode" className="scroll-mt-32 rounded-3xl border border-zinc-700/60 bg-zinc-900/40 backdrop-blur-xl shadow-2xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800">
         <div className="flex items-center gap-3">
