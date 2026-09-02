@@ -30,7 +30,17 @@ export interface Deployment {
   pot_material: string | null;
   pot_size_cm: number | null;
   has_drainage: boolean;
+  plant_type: string | null;
 }
+
+export type PlantType = "tropical" | "succulent" | "carnivorous" | "herb";
+
+export const PLANT_TYPE_CONFIG: Record<PlantType, { label: string; icon: string }> = {
+  tropical: { label: "Tropical / Foliage", icon: "🌿" },
+  succulent: { label: "Succulent / Cactus", icon: "🌵" },
+  carnivorous: { label: "Carnivorous / Bog", icon: "🪰" },
+  herb: { label: "Herbs / Edibles", icon: "🌱" },
+};
 
 type PlacementType = "pot" | "raised_bed" | "flower_bed" | "ground" | "indoor" | "greenhouse";
 
@@ -100,21 +110,26 @@ function getPlacementConfig(type: string) {
 
 // ─── Move Node Modal ──────────────────────────────────────────────────────────
 
-function MoveNodeModal({
+function DeploymentFormModal({
   deviceId,
   onClose,
   onCreated,
+  onUpdated,
+  deploymentToEdit,
 }: {
   deviceId: string;
   onClose: () => void;
-  onCreated: (d: Deployment) => void;
+  onCreated?: (d: Deployment) => void;
+  onUpdated?: (d: Deployment) => void;
+  deploymentToEdit?: Deployment;
 }) {
-  const [placement, setPlacement] = useState<PlacementType>("pot");
-  const [label, setLabel] = useState("");
-  const [notes, setNotes] = useState("");
-  const [potMaterial, setPotMaterial] = useState("terracotta");
-  const [potSize, setPotSize] = useState<number | "">("");
-  const [hasDrainage, setHasDrainage] = useState(true);
+  const [placement, setPlacement] = useState<PlacementType>((deploymentToEdit?.placement_type as PlacementType) || "pot");
+  const [label, setLabel] = useState(deploymentToEdit?.label || "");
+  const [notes, setNotes] = useState(deploymentToEdit?.notes || "");
+  const [plantType, setPlantType] = useState<PlantType>((deploymentToEdit?.plant_type as PlantType) || "tropical");
+  const [potMaterial, setPotMaterial] = useState(deploymentToEdit?.pot_material || "terracotta");
+  const [potSize, setPotSize] = useState<number | "">(deploymentToEdit?.pot_size_cm || "");
+  const [hasDrainage, setHasDrainage] = useState(deploymentToEdit ? deploymentToEdit.has_drainage : true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -126,6 +141,7 @@ function MoveNodeModal({
       const body: Record<string, unknown> = {
         device_id: deviceId,
         placement_type: placement,
+        plant_type: plantType,
         has_drainage: hasDrainage,
       };
       if (label.trim()) body.label = label.trim();
@@ -135,19 +151,32 @@ function MoveNodeModal({
         if (potSize !== "") body.pot_size_cm = potSize;
       }
 
-      const res = await fetch("/api/deployments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      let res;
+      if (deploymentToEdit) {
+        res = await fetch(`/api/deployments/${deploymentToEdit.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      } else {
+        res = await fetch("/api/deployments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      }
 
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || "Failed to create deployment");
+        throw new Error(data.error || (deploymentToEdit ? "Failed to update deployment" : "Failed to create deployment"));
       }
 
       const { deployment } = await res.json();
-      onCreated(deployment);
+      if (deploymentToEdit && onUpdated) {
+        onUpdated(deployment);
+      } else if (onCreated) {
+        onCreated(deployment);
+      }
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -174,10 +203,10 @@ function MoveNodeModal({
             </div>
             <div>
               <h2 className="text-base font-semibold text-white">
-                Log Deployment
+                {deploymentToEdit ? "Edit Deployment" : "Log Deployment"}
               </h2>
               <p className="text-xs text-zinc-500 mt-0.5">
-                Record where the node is being placed
+                {deploymentToEdit ? "Update current node placement details" : "Record where the node is being placed"}
               </p>
             </div>
           </div>
@@ -206,6 +235,29 @@ function MoveNodeModal({
                     }`}
                   >
                     {cfg.icon}
+                    <span className="text-xs font-medium">{cfg.label}</span>
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+
+          {/* Plant Type */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-zinc-300">Plant Category</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(Object.entries(PLANT_TYPE_CONFIG) as [PlantType, typeof PLANT_TYPE_CONFIG[PlantType]][]).map(
+                ([key, cfg]) => (
+                  <button
+                    key={key}
+                    onClick={() => setPlantType(key)}
+                    className={`flex items-center gap-2 p-3 rounded-xl border transition-all duration-200 ${
+                      plantType === key
+                        ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                        : "border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
+                    }`}
+                  >
+                    <span className="text-base">{cfg.icon}</span>
                     <span className="text-xs font-medium">{cfg.label}</span>
                   </button>
                 )
@@ -321,9 +373,9 @@ function MoveNodeModal({
           <button
             onClick={handleSubmit}
             disabled={submitting}
-            className="flex-1 px-4 py-2.5 text-sm font-semibold text-black bg-emerald-400 hover:bg-emerald-300 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-5 py-2.5 bg-white text-zinc-900 text-sm font-semibold rounded-xl hover:bg-zinc-200 disabled:opacity-50 transition-colors"
           >
-            {submitting ? "Logging..." : "Log Deployment"}
+            {submitting ? "Saving..." : deploymentToEdit ? "Save Changes" : "Log Deployment"}
           </button>
         </div>
       </div>
@@ -338,13 +390,16 @@ export function DeploymentPanel({
   deploymentHistory,
   deviceId,
   onDeploymentCreated,
+  onDeploymentUpdated,
 }: {
   activeDeployment: Deployment | null;
   deploymentHistory: Deployment[];
   deviceId: string;
   onDeploymentCreated: (d: Deployment) => void;
+  onDeploymentUpdated: (d: Deployment) => void;
 }) {
-  const [showModal, setShowModal] = useState(false);
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
   const handleCreated = useCallback(
@@ -362,11 +417,20 @@ export function DeploymentPanel({
 
   return (
     <>
-      {showModal && (
-        <MoveNodeModal
+      {showMoveModal && (
+        <DeploymentFormModal
           deviceId={deviceId}
-          onClose={() => setShowModal(false)}
-          onCreated={handleCreated}
+          onClose={() => setShowMoveModal(false)}
+          onCreated={onDeploymentCreated}
+        />
+      )}
+
+      {isEditing && activeDeployment && (
+        <DeploymentFormModal
+          deviceId={deviceId}
+          deploymentToEdit={activeDeployment}
+          onClose={() => setIsEditing(false)}
+          onUpdated={onDeploymentUpdated}
         />
       )}
 
@@ -389,6 +453,11 @@ export function DeploymentPanel({
                       >
                         {cfg.label}
                       </span>
+                      {activeDeployment.plant_type && (
+                        <span className="text-xs font-medium text-emerald-400">
+                          · {PLANT_TYPE_CONFIG[activeDeployment.plant_type as PlantType]?.label ?? activeDeployment.plant_type}
+                        </span>
+                      )}
                       {activeDeployment.placement_type === "pot" &&
                         activeDeployment.pot_material && (
                           <span className="text-xs text-zinc-500">
@@ -444,13 +513,24 @@ export function DeploymentPanel({
                   )}
                 </button>
               )}
-              <button
-                onClick={() => setShowModal(true)}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/15 border border-emerald-500/20 rounded-xl transition-all"
-              >
-                <Plus className="w-4 h-4" />
-                {activeDeployment ? "Move Node" : "Log Deployment"}
-              </button>
+              <div className="flex gap-2">
+                {activeDeployment && (
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800/50 hover:bg-zinc-800 hover:border-zinc-600 transition-colors"
+                  >
+                    <span className="text-xs font-semibold text-zinc-300">Edit Details</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowMoveModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors"
+                >
+                  <span className="text-xs font-semibold text-emerald-400">
+                    {activeDeployment ? "Move Node / Reset Trial" : "Log Deployment"}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
 

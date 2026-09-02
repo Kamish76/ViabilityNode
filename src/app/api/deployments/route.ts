@@ -10,6 +10,7 @@ export interface DeploymentPayload {
   pot_material?: string | null;
   pot_size_cm?: number | null;
   has_drainage?: boolean;
+  plant_type?: 'tropical' | 'succulent' | 'carnivorous' | 'herb';
 }
 
 // ── GET /api/deployments?device_id=xxx ─────────────────────────────────────
@@ -62,6 +63,7 @@ export async function POST(req: Request) {
       pot_material,
       pot_size_cm,
       has_drainage,
+      plant_type,
     } = payload;
 
     // Validation
@@ -99,6 +101,7 @@ export async function POST(req: Request) {
       ...(label !== undefined && { label }),
       ...(notes !== undefined && { notes }),
       ...(has_drainage !== undefined && { has_drainage }),
+      ...(plant_type !== undefined && { plant_type }),
     };
 
     // Only include pot-specific fields for pot placements

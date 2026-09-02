@@ -75,11 +75,24 @@ function evalRotWarning(
   vpdHistory: VPDDataPoint[],
   latestMoisture: number | null,
   isPot: boolean,
+  plantType: string | null,
 ): ThreatResult {
-  // Pots trap moisture in a smaller volume → rot develops faster
-  const satThreshold = isPot ? 75 : 85;
-  const flatThreshold = isPot ? 6 : 8;
-  const windowHours = isPot ? 48 : 72;
+  // Base thresholds
+  let satThreshold = isPot ? 75 : 85;
+  let flatThreshold = isPot ? 6 : 8;
+  let windowHours = isPot ? 48 : 72;
+
+  // Plant-specific adjustments
+  if (plantType === "succulent") {
+    // Succulents rot very easily, lower tolerance
+    satThreshold = isPot ? 60 : 70;
+    windowHours = 24; 
+  } else if (plantType === "carnivorous") {
+    // Carnivorous/bog plants naturally live in bogs, extremely high rot tolerance
+    satThreshold = 95;
+    windowHours = 168; // 7 days of complete stagnation required
+  }
+
   const moisture = recentMoistureStats(drainageData, windowHours);
   const vpd48hAvg   = recentVpdAvg(vpdHistory, 48);
 
@@ -106,9 +119,7 @@ function evalRotWarning(
     detail: "Root rot triggers when soil stays saturated (no oxygen replenishment) while chronically low VPD prevents the plant from transpiring water upward. Both conditions must persist simultaneously.",
     conditions: [
       {
-        label: isPot
-          ? `Soil ≥ ${satThreshold}% moisture, flat for ${windowHours}h (pot-adjusted)`
-          : "Soil ≥ 85% moisture, flat for 72h",
+        label: `Soil ≥ ${satThreshold}% moisture, flat for ${windowHours}h (${plantType || 'standard'} adjusted)`,
         met:   highAndFlat,
         value: moisture ? `avg ${moisture.avg.toFixed(1)}% · σ ${moisture.stdDev.toFixed(1)}%` : "Insufficient data",
       },
@@ -126,12 +137,27 @@ function evalDehydrationWarning(
   vpdHistory: VPDDataPoint[],
   latestMoisture: number | null,
   isPot: boolean,
+  plantType: string | null,
 ): ThreatResult {
-  // Pots dry out faster → trigger earlier
-  const dryThreshold = isPot ? 20 : 15;
+  // Base thresholds
+  let dryThreshold = isPot ? 20 : 15;
+  let vpdDanger = 1.5;
+
+  if (plantType === "succulent") {
+    // Succulents thrive in dry conditions
+    dryThreshold = 5;
+    vpdDanger = 2.0;
+  } else if (plantType === "carnivorous") {
+    // Bog plants dry out extremely fast and die
+    dryThreshold = 40;
+    vpdDanger = 1.2;
+  } else if (plantType === "herb") {
+    dryThreshold = isPot ? 25 : 20;
+  }
+
   const isDry   = latestMoisture !== null && latestMoisture < dryThreshold;
   const vpd7d   = recentVpdAvg(vpdHistory, 7 * 24);
-  const highVPD = vpd7d !== null && vpd7d > 1.5;
+  const highVPD = vpd7d !== null && vpd7d > vpdDanger;
 
   const atRisk = (isDry && !highVPD) || (!isDry && highVPD);
   const active  = isDry && highVPD;
@@ -149,14 +175,12 @@ function evalDehydrationWarning(
     detail: "Dehydration stress occurs when soil water reserves are depleted (low moisture) while high VPD drives rapid transpiration from leaves faster than roots can supply. Stomata close, halting photosynthesis.",
     conditions: [
       {
-        label: isPot
-          ? `Current soil moisture < ${dryThreshold}% (pot-adjusted, dries faster)`
-          : "Current soil moisture < 15%",
+        label: `Current soil moisture < ${dryThreshold}% (${plantType || 'standard'} adjusted)`,
         met:   isDry,
         value: latestMoisture !== null ? `${latestMoisture.toFixed(1)}%` : "No reading",
       },
       {
-        label: "7-day VPD avg > 1.5 kPa",
+        label: `7-day VPD avg > ${vpdDanger.toFixed(1)} kPa`,
         met:   highVPD,
         value: vpd7d !== null ? `${vpd7d.toFixed(3)} kPa` : "Insufficient data",
       },
@@ -168,15 +192,30 @@ function evalGrowthOptimization(
   dliHistory: DLIDataPoint[],
   drainageData: DrainageInput[],
   vpdHistory: VPDDataPoint[],
+  plantType: string | null,
 ): ThreatResult {
   // Latest DLI (today or most recent day)
   const latestDLI = dliHistory.length > 0
     ? [...dliHistory].sort((a, b) => b.day.localeCompare(a.day))[0].dli_mol_per_m2
     : null;
 
-  const dliOptimal = latestDLI !== null && latestDLI >= 5 && latestDLI <= 15;
-  const dliTooLow  = latestDLI !== null && latestDLI < 5;
-  const dliTooHigh = latestDLI !== null && latestDLI > 15;
+  // Base optimal DLI
+  let minDli = 5;
+  let maxDli = 15;
+
+  if (plantType === "succulent") {
+    minDli = 10; maxDli = 25;
+  } else if (plantType === "carnivorous") {
+    minDli = 10; maxDli = 15;
+  } else if (plantType === "herb") {
+    minDli = 12; maxDli = 20;
+  } else if (plantType === "tropical") {
+    minDli = 3; maxDli = 8;
+  }
+
+  const dliOptimal = latestDLI !== null && latestDLI >= minDli && latestDLI <= maxDli;
+  const dliTooLow  = latestDLI !== null && latestDLI < minDli;
+  const dliTooHigh = latestDLI !== null && latestDLI > maxDli;
 
   const vel = drainageVelocity(drainageData);
   const drainGood = vel !== null ? vel > 0.1 : null; // not stagnant
@@ -200,7 +239,7 @@ function evalGrowthOptimization(
     detail: "Peak vegetative growth requires all three factors to align simultaneously: sufficient but not excessive light (DLI), well-oxygenated soil (drainage), and moderate atmospheric drying power (VPD).",
     conditions: [
       {
-        label: "DLI in optimal range (5–15 mol/m²)",
+        label: `DLI in optimal range (${minDli}–${maxDli} mol/m²)`,
         met:   dliOptimal,
         value: latestDLI !== null
           ? `${latestDLI.toFixed(2)} mol/m² — ${dliTooLow ? "too low" : dliTooHigh ? "too high" : "✓"}`
@@ -343,17 +382,19 @@ export function ThreatAlertsPanel({
   dliHistory,
   latestMoisture,
   placementType,
+  plantType,
 }: {
   drainageData:   DrainageInput[];
   vpdHistory30:   VPDDataPoint[];
   dliHistory:     DLIDataPoint[];
   latestMoisture: number | null;
   placementType?: string | null;
+  plantType?:     string | null;
 }) {
   const isPot = placementType === "pot";
-  const rot          = evalRotWarning(drainageData, vpdHistory30, latestMoisture, isPot);
-  const dehydration  = evalDehydrationWarning(drainageData, vpdHistory30, latestMoisture, isPot);
-  const growth       = evalGrowthOptimization(dliHistory, drainageData, vpdHistory30);
+  const rot          = evalRotWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null);
+  const dehydration  = evalDehydrationWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null);
+  const growth       = evalGrowthOptimization(dliHistory, drainageData, vpdHistory30, plantType || null);
 
   const hasActive  = rot.status === "active"    || dehydration.status === "active";
   const hasAtRisk  = rot.status === "at-risk"   || dehydration.status === "at-risk";
