@@ -418,6 +418,13 @@ export function DashboardClient({
     });
   }, []);
 
+  const handleDeploymentUpdated = useCallback((d: Deployment) => {
+    setCurrentDeployment(d);
+    setAllDeployments((prev) =>
+      prev.map((existing) => (existing.id === d.id ? d : existing))
+    );
+  }, []);
+
   const placementType = currentDeployment?.placement_type ?? null;
 
   // Calibrated moisture for the TrialProgressCard
@@ -519,6 +526,7 @@ export function DashboardClient({
                 deploymentHistory={allDeployments}
                 deviceId={latest.device_id}
                 onDeploymentCreated={handleDeploymentCreated}
+                onDeploymentUpdated={handleDeploymentUpdated}
               />
             )}
 
@@ -636,6 +644,7 @@ export function DashboardClient({
                 dliHistory={dliHistory}
                 latestMoisture={moisturePct}
                 placementType={placementType}
+                plantType={currentDeployment?.plant_type || null}
               />
 
               {/* 2.1 — Daily Light Integral */}
