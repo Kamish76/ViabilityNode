@@ -445,11 +445,11 @@ export function DashboardClient({
       )}
 
       {/* Layout Wrapper */}
-      <div className="max-w-[1400px] mx-auto flex flex-col lg:flex-row items-start w-full gap-4 lg:gap-8 px-4 sm:px-6 lg:px-8">
+      <div className="w-full max-w-[1920px] mx-auto flex flex-col lg:flex-row items-start gap-4 lg:gap-8 px-4 sm:px-6 lg:px-8 2xl:px-12">
         {/* Navigation */}
         <SideNav />
 
-        <main className="flex-1 min-w-0 w-full py-12 md:py-20 pb-32 lg:pb-20 transition-all duration-300">
+        <main className="flex-1 min-w-0 w-full py-12 md:py-20 pb-[50vh] transition-all duration-300">
 
         {/* Header */}
         <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
@@ -498,7 +498,7 @@ export function DashboardClient({
             </p>
           </div>
         ) : (
-          <div className="space-y-12">
+          <div className="space-y-16 lg:space-y-24">
             <SummaryDashboard data={dailySummary} />
 
             {latest?.battery_pct != null && batteryWarning && (
@@ -538,7 +538,7 @@ export function DashboardClient({
 
             {/* Metrics Grid */}
             <div id="live-metrics" className="scroll-mt-32">
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+              <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-4 md:gap-6">
 
               <MetricCard
                 title="Temperature"
