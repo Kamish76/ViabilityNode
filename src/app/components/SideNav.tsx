@@ -47,7 +47,7 @@ export function SideNav() {
   return (
     <>
       {/* Desktop Sidebar */}
-      <nav className="hidden lg:flex flex-col w-64 fixed left-6 top-32 space-y-2 z-40">
+      <nav className="hidden lg:flex flex-col w-[260px] shrink-0 sticky top-24 h-fit space-y-2 z-40 lg:mt-20">
         <div className="p-4 rounded-3xl border border-zinc-800/80 bg-zinc-900/60 backdrop-blur-xl shadow-2xl">
           <p className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4 px-3">
             Navigation
