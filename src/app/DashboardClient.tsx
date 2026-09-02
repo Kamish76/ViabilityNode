@@ -663,6 +663,7 @@ export function DashboardClient({
                 vpdHistory30={vpdHistory30}
                 dliHistory={dliHistory}
                 latestMoisture={moisturePct}
+                logs={logs}
                 placementType={placementType}
                 plantType={currentDeployment?.plant_type || null}
               />

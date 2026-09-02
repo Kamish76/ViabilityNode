@@ -4,6 +4,7 @@ import { AlertTriangle, Droplets, Zap, CheckCircle2, Circle, ShieldAlert } from 
 import type { VPDDataPoint } from "./VPDChart";
 import type { DLIDataPoint } from "./DLIChart";
 import type { DrainageInput } from "./DrainageCard";
+import { Moon } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -259,6 +260,70 @@ export function evalGrowthOptimization(
   };
 }
 
+export function evalNightLightWarning(
+  logs: { recorded_at: string; illuminance_lux: number }[],
+  plantType: string | null,
+): ThreatResult {
+  let luxThreshold = 50; 
+  let atRiskThreshold = 25;
+
+  if (plantType === "succulent") {
+    // CAM plants require darkness to open stomata and respire
+    luxThreshold = 15; 
+    atRiskThreshold = 8;
+  } else if (plantType === "carnivorous") {
+    luxThreshold = 40;
+    atRiskThreshold = 20;
+  } else if (plantType === "tropical") {
+    luxThreshold = 30;
+    atRiskThreshold = 15;
+  }
+
+  const isNight = logs.length > 0 && (new Date(logs[0].recorded_at).getHours() >= 21 || new Date(logs[0].recorded_at).getHours() < 6);
+
+  const cutoff = Date.now() - 3600 * 1000;
+  const recentLogs = logs.filter(l => new Date(l.recorded_at).getTime() >= cutoff);
+  
+  const avgLux = recentLogs.length > 0 
+    ? recentLogs.reduce((s, l) => s + l.illuminance_lux, 0) / recentLogs.length
+    : null;
+
+  const isPolluted = avgLux !== null && avgLux > luxThreshold;
+  const isAtRisk = avgLux !== null && avgLux > atRiskThreshold && !isPolluted;
+
+  const active = isNight && isPolluted;
+  const atRisk = isNight && isAtRisk;
+
+  const status: AlertStatus = active ? "active" : atRisk ? "at-risk" : "clear";
+
+  return {
+    status,
+    title: "Night Light Pollution",
+    headline: active
+      ? "Excessive light detected during night cycle — dark period interrupted"
+      : atRisk
+      ? "Elevated light levels detected during night cycle"
+      : isNight 
+        ? "Dark period optimal" 
+        : "Currently day cycle — N/A",
+    detail: plantType === "succulent" 
+      ? "Succulents (CAM plants) require strict dark periods at night to open their stomata and absorb CO2. Light pollution disrupts this cycle, preventing respiration and leading to starvation."
+      : "Plants require a dark period for respiration and rest. Significant light pollution during the night cycle can disrupt their photoperiod, stressing the plant and stunting growth.",
+    conditions: [
+      {
+        label: "Night cycle active (21:00 - 06:00)",
+        met: isNight,
+        value: logs.length > 0 ? `${new Date(logs[0].recorded_at).getHours().toString().padStart(2, '0')}:00` : "No data",
+      },
+      {
+        label: `1h Avg Light > ${luxThreshold} lx (${plantType || 'standard'} tolerance)`,
+        met: isPolluted,
+        value: avgLux !== null ? `${avgLux.toFixed(1)} lx` : "No data",
+      },
+    ],
+  };
+}
+
 // ─── Status config ────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<AlertStatus, {
@@ -381,6 +446,7 @@ export function ThreatAlertsPanel({
   vpdHistory30,
   dliHistory,
   latestMoisture,
+  logs,
   placementType,
   plantType,
 }: {
@@ -388,6 +454,7 @@ export function ThreatAlertsPanel({
   vpdHistory30:   VPDDataPoint[];
   dliHistory:     DLIDataPoint[];
   latestMoisture: number | null;
+  logs:           { recorded_at: string; illuminance_lux: number }[];
   placementType?: string | null;
   plantType?:     string | null;
 }) {
@@ -395,10 +462,11 @@ export function ThreatAlertsPanel({
   const rot          = evalRotWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null);
   const dehydration  = evalDehydrationWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null);
   const growth       = evalGrowthOptimization(dliHistory, drainageData, vpdHistory30, plantType || null);
+  const lightPol     = evalNightLightWarning(logs, plantType || null);
 
-  const hasActive  = rot.status === "active"    || dehydration.status === "active";
-  const hasAtRisk  = rot.status === "at-risk"   || dehydration.status === "at-risk";
-  const allClear   = rot.status === "clear"     && dehydration.status === "clear";
+  const hasActive  = rot.status === "active"    || dehydration.status === "active" || lightPol.status === "active";
+  const hasAtRisk  = rot.status === "at-risk"   || dehydration.status === "at-risk" || lightPol.status === "at-risk";
+  const allClear   = rot.status === "clear"     && dehydration.status === "clear" && lightPol.status === "clear";
   const isOptimal  = growth.status === "active";
 
   return (
@@ -446,6 +514,7 @@ export function ThreatAlertsPanel({
       <div className="px-6 py-5 space-y-3">
         <AlertRow result={rot}         icon={<Droplets   className="w-4 h-4 text-blue-400" />} />
         <AlertRow result={dehydration} icon={<AlertTriangle className="w-4 h-4 text-orange-400" />} />
+        <AlertRow result={lightPol}    icon={<Moon       className="w-4 h-4 text-indigo-400" />} />
         <AlertRow result={growth}      icon={<Zap        className="w-4 h-4 text-emerald-400" />} isGrowth />
       </div>
 
