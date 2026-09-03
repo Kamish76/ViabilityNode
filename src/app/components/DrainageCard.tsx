@@ -1,6 +1,14 @@
 "use client";
 
 import { Waves, TrendingDown, AlertTriangle } from "lucide-react";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 export interface DrainageInput {
   recorded_at: string;
@@ -22,6 +30,29 @@ interface DrainageResult {
 const MIN_WATERING_SPIKE = 8;      // % — minimum rise to consider it a watering event
 const OBSERVATION_WINDOW_H  = 96;  // hours to track slope after saturation
 const SMOOTHING_WINDOW_H = 12;     // hours for moving average to remove diurnal fluctuations
+
+function getRecentRawData(data: DrainageInput[]) {
+  const sorted = [...data].sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
+  
+  // limit to last 5 days
+  const FIVE_DAYS = 5 * 24 * 60 * 60 * 1000;
+  const latestTime = sorted.length > 0 ? new Date(sorted[sorted.length - 1].recorded_at).getTime() : Date.now();
+  const recentData = sorted.filter(d => latestTime - new Date(d.recorded_at).getTime() <= FIVE_DAYS);
+
+  // Thin out data slightly if there are too many points to keep Recharts performant
+  if (recentData.length > 200) {
+    const thinFactor = Math.ceil(recentData.length / 200);
+    return recentData.filter((_, i) => i % thinFactor === 0).map(d => ({
+      time: new Date(d.recorded_at).getTime(),
+      moisture: d.moisture_pct
+    }));
+  }
+
+  return recentData.map(d => ({
+    time: new Date(d.recorded_at).getTime(),
+    moisture: d.moisture_pct
+  }));
+}
 
 export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
   if (data.length < 6) {
@@ -200,6 +231,7 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
 
 export function DrainageCard({ data }: { data: DrainageInput[] }) {
   const result = analyzeDrainage(data);
+  const chartData = getRecentRawData(data);
 
   return (
     <div
@@ -280,6 +312,61 @@ export function DrainageCard({ data }: { data: DrainageInput[] }) {
             </div>
           )}
         </div>
+        {/* Raw Moisture Chart */}
+        {chartData.length > 1 && (
+          <div className="pt-2 pb-1 h-28">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -25, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorMoisture" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={result.color} stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor={result.color} stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <XAxis 
+                  dataKey="time" 
+                  tickFormatter={(v) => new Date(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 
+                  tick={{ fill: "#71717a", fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  minTickGap={30}
+                />
+                <YAxis 
+                  domain={['auto', 'auto']}
+                  tick={{ fill: "#71717a", fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => v.toFixed(0)}
+                />
+                <Tooltip 
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      return (
+                        <div className="rounded-xl border border-zinc-700 bg-zinc-900/95 px-3 py-2 text-xs shadow-xl">
+                          <p className="text-zinc-400 mb-1">
+                            {new Date(payload[0].payload.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                          <p className="font-semibold text-white" style={{ color: result.color }}>
+                            Moisture: {Number(payload[0].value).toFixed(1)}%
+                          </p>
+                        </div>
+                      )
+                    }
+                    return null;
+                  }}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="moisture" 
+                  stroke={result.color} 
+                  strokeWidth={2}
+                  fillOpacity={1} 
+                  fill="url(#colorMoisture)" 
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
 
         {/* Saturation event timestamp */}
         {result.saturationEvent && (
