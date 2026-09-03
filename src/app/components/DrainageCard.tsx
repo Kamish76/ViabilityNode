@@ -23,7 +23,7 @@ const MIN_WATERING_SPIKE = 8;      // % — minimum rise to consider it a wateri
 const OBSERVATION_WINDOW_H  = 96;  // hours to track slope after saturation
 const SMOOTHING_WINDOW_H = 12;     // hours for moving average to remove diurnal fluctuations
 
-function analyzeDrainage(data: DrainageInput[]): DrainageResult {
+export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
   if (data.length < 6) {
     return {
       category: "insufficient",

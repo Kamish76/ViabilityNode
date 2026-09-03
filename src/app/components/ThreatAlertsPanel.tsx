@@ -3,7 +3,7 @@
 import { AlertTriangle, Droplets, Zap, CheckCircle2, Circle, ShieldAlert } from "lucide-react";
 import type { VPDDataPoint } from "./VPDChart";
 import type { DLIDataPoint } from "./DLIChart";
-import type { DrainageInput } from "./DrainageCard";
+import { DrainageInput, analyzeDrainage } from "./DrainageCard";
 import { Moon } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -43,31 +43,7 @@ function recentMoistureStats(
   return { avg, min, max, stdDev };
 }
 
-function drainageVelocity(drainageData: DrainageInput[]): number | null {
-  const SATURATION_THRESHOLD = 70;
-  const WINDOW_H = 48;
-  const sorted = [...drainageData].sort(
-    (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
-  );
-  let peakIdx = -1;
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    if (sorted[i].moisture_pct >= SATURATION_THRESHOLD) { peakIdx = i; break; }
-  }
-  if (peakIdx === -1) return null;
-  const peakTime = new Date(sorted[peakIdx].recorded_at).getTime();
-  const windowEnd = peakTime + WINDOW_H * 3600 * 1000;
-  const window = sorted.slice(peakIdx).filter(d => new Date(d.recorded_at).getTime() <= windowEnd);
-  if (window.length < 2) return null;
-  const times = window.map(d => (new Date(d.recorded_at).getTime() - peakTime) / 3600000);
-  const moistures = window.map(d => d.moisture_pct);
-  const n = times.length;
-  const sumX  = times.reduce((a, b) => a + b, 0);
-  const sumY  = moistures.reduce((a, b) => a + b, 0);
-  const sumXY = times.reduce((s, x, i) => s + x * moistures[i], 0);
-  const sumX2 = times.reduce((s, x) => s + x * x, 0);
-  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-  return slope < 0 ? Math.abs(slope) : null;
-}
+
 
 // ─── Alert evaluation ─────────────────────────────────────────────────────────
 
@@ -218,7 +194,7 @@ export function evalGrowthOptimization(
   const dliTooLow  = latestDLI !== null && latestDLI < minDli;
   const dliTooHigh = latestDLI !== null && latestDLI > maxDli;
 
-  const vel = drainageVelocity(drainageData);
+  const vel = analyzeDrainage(drainageData).velocity;
   const drainGood = vel !== null ? vel > 0.1 : null; // not stagnant
 
   const vpd7d = recentVpdAvg(vpdHistory, 7 * 24);

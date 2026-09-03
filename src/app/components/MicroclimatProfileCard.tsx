@@ -3,7 +3,7 @@
 import { Leaf, Droplets, Sun, Wind, Clock, AlertTriangle, CheckCircle2, TrendingUp } from "lucide-react";
 import type { DLIDataPoint } from "./DLIChart";
 import type { VPDDataPoint } from "./VPDChart";
-import type { DrainageInput } from "./DrainageCard";
+import { DrainageInput, analyzeDrainage } from "./DrainageCard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,32 +90,7 @@ function classifyDrain(velocity: number | null): DrainClass {
 
 // ─── Drainage slope from moisture history ─────────────────────────────────────
 
-function computeDrainageVelocity(data: DrainageInput[]): number | null {
-  const SATURATION_THRESHOLD = 70;
-  const WINDOW_H = 48;
-  if (data.length < 6) return null;
-  const sorted = [...data].sort(
-    (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
-  );
-  let peakIdx = -1;
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    if (sorted[i].moisture_pct >= SATURATION_THRESHOLD) { peakIdx = i; break; }
-  }
-  if (peakIdx === -1) return null;
-  const peakTime = new Date(sorted[peakIdx].recorded_at).getTime();
-  const windowEnd = peakTime + WINDOW_H * 3600 * 1000;
-  const window = sorted.slice(peakIdx).filter(d => new Date(d.recorded_at).getTime() <= windowEnd);
-  if (window.length < 2) return null;
-  const times = window.map(d => (new Date(d.recorded_at).getTime() - peakTime) / 3600000);
-  const moistures = window.map(d => d.moisture_pct);
-  const n = times.length;
-  const sumX  = times.reduce((a, b) => a + b, 0);
-  const sumY  = moistures.reduce((a, b) => a + b, 0);
-  const sumXY = times.reduce((s, x, i) => s + x * moistures[i], 0);
-  const sumX2 = times.reduce((s, x) => s + x * x, 0);
-  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-  return slope < 0 ? Math.abs(slope) : null;
-}
+
 
 // ─── Compute profile from data ────────────────────────────────────────────────
 
@@ -135,7 +110,7 @@ function computeProfile(
     : null;
 
   // Drainage velocity
-  const drainVelocity = computeDrainageVelocity(drainageData);
+  const drainVelocity = analyzeDrainage(drainageData).velocity;
 
   // Days of data (from earliest DLI or moisture record)
   const dliDays = dliHistory.length;
