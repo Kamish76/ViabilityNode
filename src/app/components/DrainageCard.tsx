@@ -19,8 +19,9 @@ interface DrainageResult {
   bgColor: string;
 }
 
-const SATURATION_THRESHOLD = 70;   // % — consider "wet event" start
-const OBSERVATION_WINDOW_H  = 48;  // hours to track slope after saturation
+const MIN_WATERING_SPIKE = 8;      // % — minimum rise to consider it a watering event
+const OBSERVATION_WINDOW_H  = 96;  // hours to track slope after saturation
+const SMOOTHING_WINDOW_H = 12;     // hours for moving average to remove diurnal fluctuations
 
 function analyzeDrainage(data: DrainageInput[]): DrainageResult {
   if (data.length < 6) {
@@ -42,12 +43,63 @@ function analyzeDrainage(data: DrainageInput[]): DrainageResult {
     (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
   );
 
-  // Find the last saturation peak: find highest moisture reading above threshold
+  // 1. Smooth the data to remove diurnal fluctuations (e.g. from temperature)
+  const SMOOTHING_WINDOW_MS = SMOOTHING_WINDOW_H * 60 * 60 * 1000;
+  const smoothed = sorted.map((d) => {
+    const dTime = new Date(d.recorded_at).getTime();
+    const trailingWindow = sorted.filter(x => {
+      const t = new Date(x.recorded_at).getTime();
+      return t > dTime - SMOOTHING_WINDOW_MS && t <= dTime;
+    });
+    const avg = trailingWindow.length > 0 
+      ? trailingWindow.reduce((sum, x) => sum + x.moisture_pct, 0) / trailingWindow.length
+      : d.moisture_pct;
+    return { ...d, moisture_pct: avg };
+  });
+
+  // Find the last watering peak: look for a local maximum preceded by a sharp rise
   let peakIdx = -1;
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    if (sorted[i].moisture_pct >= SATURATION_THRESHOLD) {
-      peakIdx = i;
-      break;
+  const SPIKE_WINDOW_MS = 24 * 60 * 60 * 1000; // Look for a rise within the preceding 24h
+
+  for (let i = smoothed.length - 2; i >= 0; i--) {
+    const curr = smoothed[i].moisture_pct;
+    const prev = i > 0 ? smoothed[i - 1].moisture_pct : 0;
+    const next = smoothed[i + 1].moisture_pct;
+
+    // Check if it's a local maximum (or the end of a saturated plateau)
+    if ((i === 0 || curr >= prev) && curr >= next) {
+      const cTime = new Date(smoothed[i].recorded_at).getTime();
+      let minInWindow = curr;
+      for (let j = i - 1; j >= 0; j--) {
+        const pTime = new Date(smoothed[j].recorded_at).getTime();
+        if (cTime - pTime > SPIKE_WINDOW_MS) break;
+        if (smoothed[j].moisture_pct < minInWindow) {
+          minInWindow = smoothed[j].moisture_pct;
+        }
+      }
+
+      if (curr - minInWindow >= MIN_WATERING_SPIKE) {
+        peakIdx = i;
+        break; // found the most recent watering event
+      }
+    }
+  }
+
+  // Check the very last point in case it's currently rising and hasn't peaked yet
+  if (peakIdx === -1 && smoothed.length > 1) {
+    const lastIdx = smoothed.length - 1;
+    const last = smoothed[lastIdx];
+    const cTime = new Date(last.recorded_at).getTime();
+    let minInWindow = last.moisture_pct;
+    for (let j = lastIdx - 1; j >= 0; j--) {
+      const pTime = new Date(smoothed[j].recorded_at).getTime();
+      if (cTime - pTime > SPIKE_WINDOW_MS) break;
+      if (smoothed[j].moisture_pct < minInWindow) {
+        minInWindow = smoothed[j].moisture_pct;
+      }
+    }
+    if (last.moisture_pct - minInWindow >= MIN_WATERING_SPIKE) {
+      peakIdx = lastIdx;
     }
   }
 
@@ -57,7 +109,7 @@ function analyzeDrainage(data: DrainageInput[]): DrainageResult {
       label: "No Saturation Event",
       velocity: null,
       saturationEvent: null,
-      description: `Soil has not crossed the ${SATURATION_THRESHOLD}% saturation threshold. Water the plant or wait for rain to observe drainage.`,
+      description: `No recent watering event detected (requires an ${MIN_WATERING_SPIKE}% moisture spike). Water the plant to observe drainage.`,
       plantHint: "Cannot classify soil drainage yet.",
       color: "#71717a",
       textColor: "text-zinc-400",
@@ -65,12 +117,12 @@ function analyzeDrainage(data: DrainageInput[]): DrainageResult {
     };
   }
 
-  const peakTime   = new Date(sorted[peakIdx].recorded_at).getTime();
+  const peakTime   = new Date(smoothed[peakIdx].recorded_at).getTime();
   const windowEnd  = peakTime + OBSERVATION_WINDOW_H * 60 * 60 * 1000;
-  const peakMoisture = sorted[peakIdx].moisture_pct;
+  const peakMoisture = smoothed[peakIdx].moisture_pct;
 
   // Collect readings within the window after the peak
-  const window = sorted.slice(peakIdx).filter(
+  const window = smoothed.slice(peakIdx).filter(
     (d) => new Date(d.recorded_at).getTime() <= windowEnd
   );
 
@@ -79,7 +131,7 @@ function analyzeDrainage(data: DrainageInput[]): DrainageResult {
       category: "insufficient",
       label: "Observing…",
       velocity: null,
-      saturationEvent: sorted[peakIdx].recorded_at,
+      saturationEvent: smoothed[peakIdx].recorded_at,
       description: `Saturation event detected at ${peakMoisture.toFixed(0)}%. Waiting for enough post-saturation readings (${OBSERVATION_WINDOW_H}h window).`,
       plantHint: "Check back soon.",
       color: "#14b8a6",
@@ -110,7 +162,7 @@ function analyzeDrainage(data: DrainageInput[]): DrainageResult {
       category: "rapid",
       label: "Rapid Drainage",
       velocity,
-      saturationEvent: sorted[peakIdx].recorded_at,
+      saturationEvent: smoothed[peakIdx].recorded_at,
       description: `Soil sheds water at ~${velocity.toFixed(2)}%/hr. Well-aerated root zone — oxygen returns quickly after watering.`,
       plantHint: "Ideal for: Succulents, cacti, herbs, lavender. Avoid: Bog plants, mosses.",
       color: "#10b981",
@@ -124,7 +176,7 @@ function analyzeDrainage(data: DrainageInput[]): DrainageResult {
       category: "moderate",
       label: "Moderate Drainage",
       velocity,
-      saturationEvent: sorted[peakIdx].recorded_at,
+      saturationEvent: smoothed[peakIdx].recorded_at,
       description: `Soil drains at ~${velocity.toFixed(2)}%/hr. Balanced moisture retention.`,
       plantHint: "Ideal for: Most common houseplants, tomatoes, pothos, herbs.",
       color: "#f59e0b",
@@ -137,7 +189,7 @@ function analyzeDrainage(data: DrainageInput[]): DrainageResult {
     category: "stagnant",
     label: "Stagnant / Hypoxic",
     velocity,
-    saturationEvent: sorted[peakIdx].recorded_at,
+    saturationEvent: smoothed[peakIdx].recorded_at,
     description: `Soil barely drains (~${velocity.toFixed(2)}%/hr). Root zone oxygen depletion risk is high.`,
     plantHint: "Ideal for: Mosses, ferns, bog plants. Danger for: Succulents, cacti, most vegetables.",
     color: "#ef4444",
