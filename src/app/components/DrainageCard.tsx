@@ -20,6 +20,7 @@ interface DrainageResult {
   label: string;
   velocity: number | null;      // %/hour, negative means draining
   saturationEvent: string | null; // ISO timestamp of the last detected saturation
+  peakMoisture: number | null;    // Peak moisture % reached during saturation
   description: string;
   plantHint: string;
   color: string;
@@ -61,6 +62,7 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
       label: "Insufficient Data",
       velocity: null,
       saturationEvent: null,
+      peakMoisture: null,
       description: "Need at least 6 calibrated soil moisture readings to detect a saturation event.",
       plantHint: "Continue collecting data.",
       color: "#71717a",
@@ -74,7 +76,7 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
     (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
   );
 
-  // 1. Smooth the data to remove diurnal fluctuations (e.g. from temperature)
+  // 1. Smooth the data to remove diurnal fluctuations and instant glitches
   const SMOOTHING_WINDOW_MS = SMOOTHING_WINDOW_H * 60 * 60 * 1000;
   const smoothed = sorted.map((d) => {
     const dTime = new Date(d.recorded_at).getTime();
@@ -88,60 +90,81 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
     return { ...d, moisture_pct: avg };
   });
 
-  // Find the last watering peak: look for a local maximum preceded by a sharp rise
+  // 2. Group smoothed data into 12-hour blocks and calculate block averages
+  const BLOCK_MS = 12 * 60 * 60 * 1000;
+  const blocks: { startTime: number; avgMoisture: number }[] = [];
+  const firstTime = new Date(smoothed[0].recorded_at).getTime();
+  let currentBlockStart = Math.floor(firstTime / BLOCK_MS) * BLOCK_MS;
+  
+  let blockSum = 0;
+  let blockCount = 0;
+  
+  for (let i = 0; i < smoothed.length; i++) {
+    const t = new Date(smoothed[i].recorded_at).getTime();
+    if (t >= currentBlockStart + BLOCK_MS) {
+      if (blockCount > 0) blocks.push({ startTime: currentBlockStart, avgMoisture: blockSum / blockCount });
+      currentBlockStart = Math.floor(t / BLOCK_MS) * BLOCK_MS;
+      blockSum = smoothed[i].moisture_pct;
+      blockCount = 1;
+    } else {
+      blockSum += smoothed[i].moisture_pct;
+      blockCount++;
+    }
+  }
+  if (blockCount > 0) blocks.push({ startTime: currentBlockStart, avgMoisture: blockSum / blockCount });
+
+  // 3. Find a block whose average is significantly higher than the previous block
+  let wateringBlockIdx = -1;
+  const MIN_BLOCK_SPIKE = MIN_WATERING_SPIKE / 2; // e.g. 4% block average increase
+
+  for (let i = blocks.length - 1; i > 0; i--) {
+    if (blocks[i].avgMoisture - blocks[i - 1].avgMoisture >= MIN_BLOCK_SPIKE) {
+      wateringBlockIdx = i;
+      break;
+    }
+  }
+
+  if (wateringBlockIdx === -1) {
+    return {
+      category: "insufficient",
+      label: "No Saturation Event",
+      velocity: null,
+      saturationEvent: null,
+      peakMoisture: null,
+      description: `No recent watering event detected (requires an ${MIN_WATERING_SPIKE}% moisture spike). Water the plant to observe drainage.`,
+      plantHint: "Cannot classify soil drainage yet.",
+      color: "#71717a",
+      textColor: "text-zinc-400",
+      bgColor: "bg-zinc-800/40",
+    };
+  }
+
+  // 4. Find the peak of the smoothed data within the watering block and the next block
+  const searchStart = blocks[wateringBlockIdx].startTime;
+  const searchEnd = searchStart + (2 * BLOCK_MS);
+  
   let peakIdx = -1;
-  const SPIKE_WINDOW_MS = 24 * 60 * 60 * 1000; // Look for a rise within the preceding 24h
-
-  for (let i = smoothed.length - 2; i >= 0; i--) {
-    const curr = smoothed[i].moisture_pct;
-    const prev = i > 0 ? smoothed[i - 1].moisture_pct : 0;
-    const next = smoothed[i + 1].moisture_pct;
-
-    // Check if it's a local maximum (or the end of a saturated plateau)
-    if ((i === 0 || curr >= prev) && curr >= next) {
-      const cTime = new Date(smoothed[i].recorded_at).getTime();
-      let minInWindow = curr;
-      for (let j = i - 1; j >= 0; j--) {
-        const pTime = new Date(smoothed[j].recorded_at).getTime();
-        if (cTime - pTime > SPIKE_WINDOW_MS) break;
-        if (smoothed[j].moisture_pct < minInWindow) {
-          minInWindow = smoothed[j].moisture_pct;
-        }
-      }
-
-      if (curr - minInWindow >= MIN_WATERING_SPIKE) {
+  let peakMoistureVal = -1;
+  for (let i = 0; i < smoothed.length; i++) {
+    const t = new Date(smoothed[i].recorded_at).getTime();
+    if (t >= searchStart && t <= searchEnd) {
+      if (smoothed[i].moisture_pct > peakMoistureVal) {
+        peakMoistureVal = smoothed[i].moisture_pct;
         peakIdx = i;
-        break; // found the most recent watering event
       }
     }
   }
 
-  // Check the very last point in case it's currently rising and hasn't peaked yet
-  if (peakIdx === -1 && smoothed.length > 1) {
-    const lastIdx = smoothed.length - 1;
-    const last = smoothed[lastIdx];
-    const cTime = new Date(last.recorded_at).getTime();
-    let minInWindow = last.moisture_pct;
-    for (let j = lastIdx - 1; j >= 0; j--) {
-      const pTime = new Date(smoothed[j].recorded_at).getTime();
-      if (cTime - pTime > SPIKE_WINDOW_MS) break;
-      if (smoothed[j].moisture_pct < minInWindow) {
-        minInWindow = smoothed[j].moisture_pct;
-      }
-    }
-    if (last.moisture_pct - minInWindow >= MIN_WATERING_SPIKE) {
-      peakIdx = lastIdx;
-    }
-  }
-
+  // Fallback in case peakIdx somehow wasn't found (shouldn't happen)
   if (peakIdx === -1) {
     return {
       category: "insufficient",
       label: "No Saturation Event",
       velocity: null,
       saturationEvent: null,
-      description: `No recent watering event detected (requires an ${MIN_WATERING_SPIKE}% moisture spike). Water the plant to observe drainage.`,
-      plantHint: "Cannot classify soil drainage yet.",
+      peakMoisture: null,
+      description: `Watering event suspected, but couldn't locate peak.`,
+      plantHint: "Wait for more data.",
       color: "#71717a",
       textColor: "text-zinc-400",
       bgColor: "bg-zinc-800/40",
@@ -163,6 +186,7 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
       label: "Observing…",
       velocity: null,
       saturationEvent: smoothed[peakIdx].recorded_at,
+      peakMoisture: peakMoisture,
       description: `Saturation event detected at ${peakMoisture.toFixed(0)}%. Waiting for enough post-saturation readings (${OBSERVATION_WINDOW_H}h window).`,
       plantHint: "Check back soon.",
       color: "#14b8a6",
@@ -194,6 +218,7 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
       label: "Rapid Drainage",
       velocity,
       saturationEvent: smoothed[peakIdx].recorded_at,
+      peakMoisture: peakMoisture,
       description: `Soil sheds water at ~${velocity.toFixed(2)}%/hr. Well-aerated root zone — oxygen returns quickly after watering.`,
       plantHint: "Ideal for: Succulents, cacti, herbs, lavender. Avoid: Bog plants, mosses.",
       color: "#10b981",
@@ -208,6 +233,7 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
       label: "Moderate Drainage",
       velocity,
       saturationEvent: smoothed[peakIdx].recorded_at,
+      peakMoisture: peakMoisture,
       description: `Soil drains at ~${velocity.toFixed(2)}%/hr. Balanced moisture retention.`,
       plantHint: "Ideal for: Most common houseplants, tomatoes, pothos, herbs.",
       color: "#f59e0b",
@@ -221,6 +247,7 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
     label: "Stagnant / Hypoxic",
     velocity,
     saturationEvent: smoothed[peakIdx].recorded_at,
+    peakMoisture: peakMoisture,
     description: `Soil barely drains (~${velocity.toFixed(2)}%/hr). Root zone oxygen depletion risk is high.`,
     plantHint: "Ideal for: Mosses, ferns, bog plants. Danger for: Succulents, cacti, most vegetables.",
     color: "#ef4444",
@@ -368,17 +395,27 @@ export function DrainageCard({ data }: { data: DrainageInput[] }) {
           </div>
         )}
 
-        {/* Saturation event timestamp */}
+        {/* Saturation event info */}
         {result.saturationEvent && (
-          <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: result.color }} />
-            Last saturation event:{" "}
-            <span className="text-zinc-300">
-              {new Date(result.saturationEvent).toLocaleString(undefined, {
-                month: "short", day: "numeric",
-                hour: "2-digit", minute: "2-digit",
-              })}
-            </span>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2 text-xs text-zinc-500">
+              <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: result.color }} />
+              Last saturation event:{" "}
+              <span className="text-zinc-300">
+                {new Date(result.saturationEvent).toLocaleString(undefined, {
+                  month: "short", day: "numeric",
+                  hour: "2-digit", minute: "2-digit",
+                })}
+              </span>
+            </div>
+            {result.peakMoisture !== null && (
+              <div className="flex items-center gap-2 text-xs text-zinc-500 ml-3.5">
+                Peak moisture hit:{" "}
+                <span className="text-zinc-300 font-medium">
+                  {result.peakMoisture.toFixed(1)}%
+                </span>
+              </div>
+            )}
           </div>
         )}
 
