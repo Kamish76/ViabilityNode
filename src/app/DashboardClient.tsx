@@ -21,7 +21,12 @@ import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
 import { VPDChart, type VPDDataPoint } from "./components/VPDChart";
 import { DrainageCard, type DrainageInput } from "./components/DrainageCard";
 import { MicroclimatProfileCard } from "./components/MicroclimatProfileCard";
-import { ThreatAlertsPanel } from "./components/ThreatAlertsPanel";
+import { 
+  ThreatAlertsPanel,
+  evalRotWarning,
+  evalDehydrationWarning,
+  evalGrowthOptimization
+} from "./components/ThreatAlertsPanel";
 import { DeploymentPanel, type Deployment } from "./components/DeploymentPanel";
 import { TrialProgressCard } from "./components/TrialProgressCard";
 import { SideNav } from "./components/SideNav";
@@ -405,10 +410,8 @@ export function DashboardClient({
 
   // Deployment management
   const handleDeploymentCreated = useCallback((d: Deployment) => {
-    // The new deployment is now active; the old one was auto-ended by the API
     setCurrentDeployment(d);
     setAllDeployments((prev) => {
-      // Mark the previously-active deployment as ended
       const updated = prev.map((existing) =>
         existing.ended_at === null && existing.id !== d.id
           ? { ...existing, ended_at: new Date().toISOString() }
@@ -432,6 +435,19 @@ export function DashboardClient({
     recorded_at: r.recorded_at,
     moisture_pct: calculateMoisturePct(r.soil_moisture_raw, calibration),
   }));
+
+  // Calculate overall viability status
+  const currentPlantType = currentDeployment?.plant_type || null;
+  const isPot = placementType === "pot";
+  const rot = evalRotWarning(drainageData, vpdHistory30, moisturePct, isPot, currentPlantType);
+  const dehy = evalDehydrationWarning(drainageData, vpdHistory30, moisturePct, isPot, currentPlantType);
+  const growth = evalGrowthOptimization(dliHistory, drainageData, vpdHistory30, currentPlantType);
+
+  const hasActiveThreat = rot.status === "active" || dehy.status === "active";
+  const hasRisk = rot.status === "at-risk" || dehy.status === "at-risk";
+  const isOptimal = growth.status === "active";
+  
+  const viabilityStatus = hasActiveThreat ? "critical" : hasRisk ? "warning" : isOptimal ? "optimal" : "monitoring";
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-emerald-500/30 font-sans">
@@ -506,7 +522,24 @@ export function DashboardClient({
           </div>
         ) : (
           <div className="space-y-16 lg:space-y-24">
-            <SummaryDashboard data={dailySummary} />
+            <div className="space-y-6">
+              <SummaryDashboard 
+                data={dailySummary} 
+                viabilityStatus={viabilityStatus}
+                plantType={currentPlantType}
+              />
+
+              {/* Sitter Mode: Active Threat Alerts */}
+              <ThreatAlertsPanel
+                drainageData={drainageData}
+                vpdHistory30={vpdHistory30}
+                dliHistory={dliHistory}
+                latestMoisture={moisturePct}
+                logs={logs}
+                placementType={placementType}
+                plantType={currentDeployment?.plant_type || null}
+              />
+            </div>
 
             {latest?.battery_pct != null && batteryWarning && (
               <div className="flex items-center gap-3 px-5 py-3.5 rounded-2xl bg-orange-500/10 border border-orange-500/30">
@@ -635,16 +668,6 @@ export function DashboardClient({
                 vpdHistory30={vpdHistory30}
                 drainageData={drainageData}
                 placementType={placementType}
-              />
-
-              {/* 4.0 — Sitter Mode: Active Threat Alerts (Phase 4) */}
-              <ThreatAlertsPanel
-                drainageData={drainageData}
-                vpdHistory30={vpdHistory30}
-                dliHistory={dliHistory}
-                latestMoisture={moisturePct}
-                placementType={placementType}
-                plantType={currentDeployment?.plant_type || null}
               />
 
               {/* 2.1 — Daily Light Integral */}

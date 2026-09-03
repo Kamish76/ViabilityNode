@@ -3,11 +3,12 @@
 import { AlertTriangle, Droplets, Zap, CheckCircle2, Circle, ShieldAlert } from "lucide-react";
 import type { VPDDataPoint } from "./VPDChart";
 import type { DLIDataPoint } from "./DLIChart";
-import type { DrainageInput } from "./DrainageCard";
+import { DrainageInput, analyzeDrainage } from "./DrainageCard";
+import { Moon } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type AlertStatus = "active" | "at-risk" | "clear" | "monitoring";
+export type AlertStatus = "active" | "at-risk" | "clear" | "monitoring";
 
 interface ThreatResult {
   status:      AlertStatus;
@@ -42,35 +43,11 @@ function recentMoistureStats(
   return { avg, min, max, stdDev };
 }
 
-function drainageVelocity(drainageData: DrainageInput[]): number | null {
-  const SATURATION_THRESHOLD = 70;
-  const WINDOW_H = 48;
-  const sorted = [...drainageData].sort(
-    (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
-  );
-  let peakIdx = -1;
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    if (sorted[i].moisture_pct >= SATURATION_THRESHOLD) { peakIdx = i; break; }
-  }
-  if (peakIdx === -1) return null;
-  const peakTime = new Date(sorted[peakIdx].recorded_at).getTime();
-  const windowEnd = peakTime + WINDOW_H * 3600 * 1000;
-  const window = sorted.slice(peakIdx).filter(d => new Date(d.recorded_at).getTime() <= windowEnd);
-  if (window.length < 2) return null;
-  const times = window.map(d => (new Date(d.recorded_at).getTime() - peakTime) / 3600000);
-  const moistures = window.map(d => d.moisture_pct);
-  const n = times.length;
-  const sumX  = times.reduce((a, b) => a + b, 0);
-  const sumY  = moistures.reduce((a, b) => a + b, 0);
-  const sumXY = times.reduce((s, x, i) => s + x * moistures[i], 0);
-  const sumX2 = times.reduce((s, x) => s + x * x, 0);
-  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-  return slope < 0 ? Math.abs(slope) : null;
-}
+
 
 // ─── Alert evaluation ─────────────────────────────────────────────────────────
 
-function evalRotWarning(
+export function evalRotWarning(
   drainageData: DrainageInput[],
   vpdHistory: VPDDataPoint[],
   latestMoisture: number | null,
@@ -132,7 +109,7 @@ function evalRotWarning(
   };
 }
 
-function evalDehydrationWarning(
+export function evalDehydrationWarning(
   drainageData: DrainageInput[],
   vpdHistory: VPDDataPoint[],
   latestMoisture: number | null,
@@ -188,7 +165,7 @@ function evalDehydrationWarning(
   };
 }
 
-function evalGrowthOptimization(
+export function evalGrowthOptimization(
   dliHistory: DLIDataPoint[],
   drainageData: DrainageInput[],
   vpdHistory: VPDDataPoint[],
@@ -217,7 +194,7 @@ function evalGrowthOptimization(
   const dliTooLow  = latestDLI !== null && latestDLI < minDli;
   const dliTooHigh = latestDLI !== null && latestDLI > maxDli;
 
-  const vel = drainageVelocity(drainageData);
+  const vel = analyzeDrainage(drainageData).velocity;
   const drainGood = vel !== null ? vel > 0.1 : null; // not stagnant
 
   const vpd7d = recentVpdAvg(vpdHistory, 7 * 24);
@@ -254,6 +231,70 @@ function evalGrowthOptimization(
         label: "VPD in stable zone (0.8–1.2 kPa)",
         met:   vpdOptimal,
         value: vpd7d !== null ? `${vpd7d.toFixed(3)} kPa 7-day avg` : "Insufficient VPD data",
+      },
+    ],
+  };
+}
+
+export function evalNightLightWarning(
+  logs: { recorded_at: string; illuminance_lux: number }[],
+  plantType: string | null,
+): ThreatResult {
+  let luxThreshold = 50; 
+  let atRiskThreshold = 25;
+
+  if (plantType === "succulent") {
+    // CAM plants require darkness to open stomata and respire
+    luxThreshold = 15; 
+    atRiskThreshold = 8;
+  } else if (plantType === "carnivorous") {
+    luxThreshold = 40;
+    atRiskThreshold = 20;
+  } else if (plantType === "tropical") {
+    luxThreshold = 30;
+    atRiskThreshold = 15;
+  }
+
+  const isNight = logs.length > 0 && (new Date(logs[0].recorded_at).getHours() >= 21 || new Date(logs[0].recorded_at).getHours() < 6);
+
+  const cutoff = Date.now() - 3600 * 1000;
+  const recentLogs = logs.filter(l => new Date(l.recorded_at).getTime() >= cutoff);
+  
+  const avgLux = recentLogs.length > 0 
+    ? recentLogs.reduce((s, l) => s + l.illuminance_lux, 0) / recentLogs.length
+    : null;
+
+  const isPolluted = avgLux !== null && avgLux > luxThreshold;
+  const isAtRisk = avgLux !== null && avgLux > atRiskThreshold && !isPolluted;
+
+  const active = isNight && isPolluted;
+  const atRisk = isNight && isAtRisk;
+
+  const status: AlertStatus = active ? "active" : atRisk ? "at-risk" : "clear";
+
+  return {
+    status,
+    title: "Night Light Pollution",
+    headline: active
+      ? "Excessive light detected during night cycle — dark period interrupted"
+      : atRisk
+      ? "Elevated light levels detected during night cycle"
+      : isNight 
+        ? "Dark period optimal" 
+        : "Currently day cycle — N/A",
+    detail: plantType === "succulent" 
+      ? "Succulents (CAM plants) require strict dark periods at night to open their stomata and absorb CO2. Light pollution disrupts this cycle, preventing respiration and leading to starvation."
+      : "Plants require a dark period for respiration and rest. Significant light pollution during the night cycle can disrupt their photoperiod, stressing the plant and stunting growth.",
+    conditions: [
+      {
+        label: "Night cycle active (21:00 - 06:00)",
+        met: isNight,
+        value: logs.length > 0 ? `${new Date(logs[0].recorded_at).getHours().toString().padStart(2, '0')}:00` : "No data",
+      },
+      {
+        label: `1h Avg Light > ${luxThreshold} lx (${plantType || 'standard'} tolerance)`,
+        met: isPolluted,
+        value: avgLux !== null ? `${avgLux.toFixed(1)} lx` : "No data",
       },
     ],
   };
@@ -381,6 +422,7 @@ export function ThreatAlertsPanel({
   vpdHistory30,
   dliHistory,
   latestMoisture,
+  logs,
   placementType,
   plantType,
 }: {
@@ -388,6 +430,7 @@ export function ThreatAlertsPanel({
   vpdHistory30:   VPDDataPoint[];
   dliHistory:     DLIDataPoint[];
   latestMoisture: number | null;
+  logs:           { recorded_at: string; illuminance_lux: number }[];
   placementType?: string | null;
   plantType?:     string | null;
 }) {
@@ -395,14 +438,15 @@ export function ThreatAlertsPanel({
   const rot          = evalRotWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null);
   const dehydration  = evalDehydrationWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null);
   const growth       = evalGrowthOptimization(dliHistory, drainageData, vpdHistory30, plantType || null);
+  const lightPol     = evalNightLightWarning(logs, plantType || null);
 
-  const hasActive  = rot.status === "active"    || dehydration.status === "active";
-  const hasAtRisk  = rot.status === "at-risk"   || dehydration.status === "at-risk";
-  const allClear   = rot.status === "clear"     && dehydration.status === "clear";
+  const hasActive  = rot.status === "active"    || dehydration.status === "active" || lightPol.status === "active";
+  const hasAtRisk  = rot.status === "at-risk"   || dehydration.status === "at-risk" || lightPol.status === "at-risk";
+  const allClear   = rot.status === "clear"     && dehydration.status === "clear" && lightPol.status === "clear";
   const isOptimal  = growth.status === "active";
 
   return (
-    <div className="rounded-3xl border border-zinc-700/60 bg-zinc-900/40 backdrop-blur-xl shadow-2xl overflow-hidden">
+    <div id="sitter-mode" className="scroll-mt-32 rounded-3xl border border-zinc-700/60 bg-zinc-900/40 backdrop-blur-xl shadow-2xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800">
         <div className="flex items-center gap-3">
@@ -446,6 +490,7 @@ export function ThreatAlertsPanel({
       <div className="px-6 py-5 space-y-3">
         <AlertRow result={rot}         icon={<Droplets   className="w-4 h-4 text-blue-400" />} />
         <AlertRow result={dehydration} icon={<AlertTriangle className="w-4 h-4 text-orange-400" />} />
+        <AlertRow result={lightPol}    icon={<Moon       className="w-4 h-4 text-indigo-400" />} />
         <AlertRow result={growth}      icon={<Zap        className="w-4 h-4 text-emerald-400" />} isGrowth />
       </div>
 

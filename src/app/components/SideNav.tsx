@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { LayoutDashboard, Activity, FlaskConical, LineChart, ListTree } from "lucide-react";
+import { LayoutDashboard, Activity, FlaskConical, LineChart, ListTree, ShieldAlert } from "lucide-react";
 
 const navItems = [
   { id: "summary", label: "Summary", icon: LayoutDashboard },
+  { id: "sitter-mode", label: "Sitter Mode", icon: ShieldAlert },
   { id: "trial-progress", label: "Trial Progress", icon: FlaskConical },
   { id: "live-metrics", label: "Live Metrics", icon: Activity },
   { id: "analytics", label: "Analytics", icon: LineChart },
