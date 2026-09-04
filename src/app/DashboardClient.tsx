@@ -15,6 +15,8 @@ import {
   FlaskConical,
   AlertTriangle,
   Clock,
+  Copy,
+  Check,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
@@ -325,6 +327,26 @@ function CalibrationModal({
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
+
+function CopyLogsButton({ logs }: { logs: TelemetryData[] }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(JSON.stringify(logs, null, 2));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 bg-zinc-800/50 hover:bg-zinc-800 hover:text-zinc-200 rounded-lg transition-colors border border-zinc-700/50"
+    >
+      {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+      {copied ? "Copied" : "Copy JSON"}
+    </button>
+  );
+}
 
 export function DashboardClient({
   initialLogs,
@@ -685,11 +707,12 @@ export function DashboardClient({
 
             {/* Log Table */}
             <div id="live-logs" className="mt-4 rounded-3xl border border-zinc-800/80 bg-zinc-900/40 backdrop-blur-xl overflow-hidden shadow-2xl scroll-mt-32">
-              <div className="px-6 py-5 border-b border-zinc-800">
+              <div className="px-6 py-5 border-b border-zinc-800 flex items-center justify-between">
                 <h3 className="text-lg font-medium text-white flex items-center gap-2">
                   <Activity className="w-5 h-5 text-zinc-400" />
                   Live Telemetry Logs
                 </h3>
+                <CopyLogsButton logs={logs} />
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
