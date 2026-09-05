@@ -15,6 +15,8 @@ import {
   FlaskConical,
   AlertTriangle,
   Clock,
+  Copy,
+  Check,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
@@ -63,8 +65,8 @@ interface CalibrationConfig {
 }
 
 const DEFAULT_CALIBRATION: CalibrationConfig = {
-  dryLimit: 1910,
-  wetLimit: 1100,
+  dryLimit: 1920,
+  wetLimit: 1330,
 };
 
 function loadCalibration(): CalibrationConfig {
@@ -88,10 +90,23 @@ function saveCalibration(cfg: CalibrationConfig): void {
 
 // ─── Calculations ─────────────────────────────────────────────────────────────
 
-function calculateVPD(tempC: number, humidityRH: number): number {
-  const eSat = 0.61078 * Math.exp((17.27 * tempC) / (tempC + 237.3));
-  const eAct = eSat * (humidityRH / 100);
-  return eSat - eAct;
+function calculateVPD(tempC: number, humidityRH: number, lux: number = 0): number {
+  // During daytime (lux > 1000), transpiring leaves cool themselves. 
+  // We use a -2°C offset to calculate true Leaf VPD, preventing artificial daytime spikes.
+  const isDaytime = lux > 1000;
+  const leafTempOffsetC = isDaytime ? -2 : 0;
+  const leafTempC = tempC + leafTempOffsetC;
+
+  // Saturation vapor pressure at the leaf surface (using leaf temperature)
+  const eSatLeaf = 0.61078 * Math.exp((17.27 * leafTempC) / (leafTempC + 237.3));
+  
+  // Actual vapor pressure in the air (using ambient air temperature and humidity)
+  const eSatAir = 0.61078 * Math.exp((17.27 * tempC) / (tempC + 237.3));
+  const eActAir = eSatAir * (humidityRH / 100);
+  
+  // VPD is the difference between leaf saturation pressure and actual air pressure.
+  // We clamp to 0 in case extreme cooling/humidity causes a negative theoretical value.
+  return Math.max(0, eSatLeaf - eActAir);
 }
 
 function calculateMoisturePct(
@@ -326,6 +341,26 @@ function CalibrationModal({
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
+function CopyLogsButton({ logs }: { logs: TelemetryData[] }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(JSON.stringify(logs, null, 2));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 bg-zinc-800/50 hover:bg-zinc-800 hover:text-zinc-200 rounded-lg transition-colors border border-zinc-700/50"
+    >
+      {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+      {copied ? "Copied" : "Copy JSON"}
+    </button>
+  );
+}
+
 export function DashboardClient({
   initialLogs,
   batteryHistory,
@@ -371,7 +406,7 @@ export function DashboardClient({
         (payload) => {
           const newLog = payload.new as TelemetryData;
           if (newLog.vpd_kpa === undefined) {
-            newLog.vpd_kpa = calculateVPD(newLog.temperature_c, newLog.humidity_rh);
+            newLog.vpd_kpa = calculateVPD(newLog.temperature_c, newLog.humidity_rh, newLog.illuminance_lux);
           }
           setLogs((current) => {
             if (current.some((l) => l.id === newLog.id)) return current;
@@ -406,6 +441,7 @@ export function DashboardClient({
   const drainageData: DrainageInput[] = moistureHistory.map((r) => ({
     recorded_at: r.recorded_at,
     moisture_pct: calculateMoisturePct(r.soil_moisture_raw, calibration),
+    raw: r.soil_moisture_raw,
   }));
 
   // Deployment management
@@ -685,11 +721,12 @@ export function DashboardClient({
 
             {/* Log Table */}
             <div id="live-logs" className="mt-4 rounded-3xl border border-zinc-800/80 bg-zinc-900/40 backdrop-blur-xl overflow-hidden shadow-2xl scroll-mt-32">
-              <div className="px-6 py-5 border-b border-zinc-800">
+              <div className="px-6 py-5 border-b border-zinc-800 flex items-center justify-between">
                 <h3 className="text-lg font-medium text-white flex items-center gap-2">
                   <Activity className="w-5 h-5 text-zinc-400" />
                   Live Telemetry Logs
                 </h3>
+                <CopyLogsButton logs={logs} />
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
