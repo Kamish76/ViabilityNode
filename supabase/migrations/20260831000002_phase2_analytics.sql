@@ -13,25 +13,34 @@
 --   PPFD (µmol/m²/s) = illuminance_lux × 0.0185   (sunlight coefficient)
 --   DLI (mol/m²/day) = Σ(PPFD × Δt_seconds) ÷ 1,000,000
 --
--- We approximate Δt as the average interval between readings for the day.
--- Supabase/PostgreSQL approach: sum PPFD readings, multiply by avg interval.
--- For n readings spaced evenly across a day, avg interval ≈ 86400 / n seconds.
--- This gives:  DLI ≈ (Σ PPFD × 86400/n) / 1,000,000
---            = (Σ PPFD / n) × 86400 / 1,000,000
---            = avg(PPFD) × 86400 / 1,000,000
+-- Accurate trapezoidal integration:
+--   We calculate the time difference (Δt) from the previous reading.
+--   If the gap is excessively large (> 2 hours), we cap it to avoid artificially
+--   inflating DLI during offline periods or node reboots.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE VIEW daily_dli AS
-SELECT
+WITH lagged AS (
+    SELECT 
+        device_id,
+        recorded_at,
+        (illuminance_lux * 0.0185) AS ppfd,
+        LAG(illuminance_lux * 0.0185) OVER (PARTITION BY device_id ORDER BY recorded_at) AS prev_ppfd,
+        LAG(recorded_at) OVER (PARTITION BY device_id ORDER BY recorded_at) AS prev_time
+    FROM telemetry
+)
+SELECT 
     device_id,
     DATE(recorded_at AT TIME ZONE 'UTC') AS day,
-    COUNT(*)                              AS reading_count,
-    ROUND(AVG(illuminance_lux * 0.0185)::NUMERIC, 4) AS avg_ppfd,
-    -- DLI: avg_ppfd × seconds_in_day / 1,000,000
+    COUNT(*) AS reading_count,
+    ROUND(AVG(ppfd)::NUMERIC, 4) AS avg_ppfd,
     ROUND(
-        (AVG(illuminance_lux * 0.0185) * 86400.0 / 1000000.0)::NUMERIC,
+        SUM(
+            ((ppfd + COALESCE(prev_ppfd, ppfd)) / 2.0) * 
+            LEAST(EXTRACT(EPOCH FROM (recorded_at - COALESCE(prev_time, recorded_at))), 7200)
+        ) / 1000000.0,
         4
     ) AS dli_mol_per_m2
-FROM telemetry
+FROM lagged
 GROUP BY device_id, DATE(recorded_at AT TIME ZONE 'UTC')
 ORDER BY day DESC;
 
