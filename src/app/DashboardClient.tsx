@@ -65,8 +65,8 @@ interface CalibrationConfig {
 }
 
 const DEFAULT_CALIBRATION: CalibrationConfig = {
-  dryLimit: 1910,
-  wetLimit: 1100,
+  dryLimit: 1920,
+  wetLimit: 1330,
 };
 
 function loadCalibration(): CalibrationConfig {
@@ -428,6 +428,7 @@ export function DashboardClient({
   const drainageData: DrainageInput[] = moistureHistory.map((r) => ({
     recorded_at: r.recorded_at,
     moisture_pct: calculateMoisturePct(r.soil_moisture_raw, calibration),
+    raw: r.soil_moisture_raw,
   }));
 
   // Deployment management
