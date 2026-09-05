@@ -90,10 +90,23 @@ function saveCalibration(cfg: CalibrationConfig): void {
 
 // ─── Calculations ─────────────────────────────────────────────────────────────
 
-function calculateVPD(tempC: number, humidityRH: number): number {
-  const eSat = 0.61078 * Math.exp((17.27 * tempC) / (tempC + 237.3));
-  const eAct = eSat * (humidityRH / 100);
-  return eSat - eAct;
+function calculateVPD(tempC: number, humidityRH: number, lux: number = 0): number {
+  // During daytime (lux > 1000), transpiring leaves cool themselves. 
+  // We use a -2°C offset to calculate true Leaf VPD, preventing artificial daytime spikes.
+  const isDaytime = lux > 1000;
+  const leafTempOffsetC = isDaytime ? -2 : 0;
+  const leafTempC = tempC + leafTempOffsetC;
+
+  // Saturation vapor pressure at the leaf surface (using leaf temperature)
+  const eSatLeaf = 0.61078 * Math.exp((17.27 * leafTempC) / (leafTempC + 237.3));
+  
+  // Actual vapor pressure in the air (using ambient air temperature and humidity)
+  const eSatAir = 0.61078 * Math.exp((17.27 * tempC) / (tempC + 237.3));
+  const eActAir = eSatAir * (humidityRH / 100);
+  
+  // VPD is the difference between leaf saturation pressure and actual air pressure.
+  // We clamp to 0 in case extreme cooling/humidity causes a negative theoretical value.
+  return Math.max(0, eSatLeaf - eActAir);
 }
 
 function calculateMoisturePct(
@@ -393,7 +406,7 @@ export function DashboardClient({
         (payload) => {
           const newLog = payload.new as TelemetryData;
           if (newLog.vpd_kpa === undefined) {
-            newLog.vpd_kpa = calculateVPD(newLog.temperature_c, newLog.humidity_rh);
+            newLog.vpd_kpa = calculateVPD(newLog.temperature_c, newLog.humidity_rh, newLog.illuminance_lux);
           }
           setLogs((current) => {
             if (current.some((l) => l.id === newLog.id)) return current;

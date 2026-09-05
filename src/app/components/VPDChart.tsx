@@ -74,7 +74,7 @@ export function VPDChart({ data, rollingAvg }: { data: VPDDataPoint[]; rollingAv
           </div>
           <div>
             <h3 className="text-base font-semibold text-white">Vapor Pressure Deficit</h3>
-            <p className="text-xs text-zinc-500 mt-0.5">7-day rolling · atmospheric drying power</p>
+            <p className="text-xs text-zinc-500 mt-0.5">7-day rolling · leaf-surface drying power (daytime offset applied)</p>
           </div>
         </div>
         {cls && (

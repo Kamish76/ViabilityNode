@@ -55,8 +55,11 @@ CREATE OR REPLACE VIEW telemetry_with_vpd AS
 SELECT
     *,
     ROUND(
-        (0.61078 * EXP((17.27 * temperature_c) / (temperature_c + 237.3)))
-        * (1.0 - (humidity_rh / 100.0)),
+        GREATEST(0.0,
+            (0.61078 * EXP((17.27 * (temperature_c + CASE WHEN illuminance_lux > 1000 THEN -2.0 ELSE 0.0 END)) / ((temperature_c + CASE WHEN illuminance_lux > 1000 THEN -2.0 ELSE 0.0 END) + 237.3)))
+            -
+            (0.61078 * EXP((17.27 * temperature_c) / (temperature_c + 237.3)) * (humidity_rh / 100.0))
+        )::NUMERIC,
         3
     ) AS vpd_kpa
 FROM telemetry;
