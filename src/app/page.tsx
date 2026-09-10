@@ -194,7 +194,7 @@ export default async function DashboardPage() {
   if (deviceId) {
     const { data: vpdRows, error: vpdError } = await supabaseAdmin
       .from("telemetry_with_vpd")
-      .select("recorded_at, vpd_kpa")
+      .select("recorded_at, vpd_kpa, temperature_c, humidity_rh")
       .eq("device_id", deviceId)
       .gte("recorded_at", thirtyDaysAgo.toISOString())
       .not("vpd_kpa", "is", null)
@@ -219,6 +219,8 @@ export default async function DashboardPage() {
         return {
           recorded_at: r.recorded_at as string,
           vpd_kpa: parseFloat((eSat * (1 - rh / 100)).toFixed(3)),
+          temperature_c: temp,
+          humidity_rh: rh,
         };
       });
     } else {

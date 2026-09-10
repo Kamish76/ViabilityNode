@@ -15,6 +15,8 @@ import { Wind, TrendingUp } from "lucide-react";
 export interface VPDDataPoint {
   recorded_at: string;
   vpd_kpa: number;
+  temperature_c?: number;
+  humidity_rh?: number;
 }
 
 // VPD zones (kPa)
@@ -27,7 +29,8 @@ const ZONES = {
 function classifyVPD(vpd: number): { label: string; color: string; textColor: string } {
   if (vpd < 0.4)  return { label: "Low · Fungal Risk",    color: "#8b5cf6", textColor: "text-purple-400" };
   if (vpd <= 1.6) return { label: "Optimal Transpiration", color: "#10b981", textColor: "text-emerald-400" };
-  return               { label: "High · Drought Risk",    color: "#ef4444", textColor: "text-red-400" };
+  if (vpd <= 4.0) return { label: "High · Drought Risk",   color: "#ef4444", textColor: "text-red-400" };
+  return          { label: "Extreme · Anomaly",            color: "#f97316", textColor: "text-orange-400" };
 }
 
 interface TooltipPayload {
@@ -49,6 +52,18 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Toolti
       </p>
       <p className="text-white font-semibold">{d.vpd_kpa.toFixed(3)} kPa</p>
       <p className={`text-xs mt-0.5 ${cls.textColor}`}>{cls.label}</p>
+      {(d.temperature_c !== undefined || d.humidity_rh !== undefined) && (
+        <div className="pt-2 mt-2 border-t border-zinc-700/50 flex gap-4 text-[10px] text-zinc-400">
+          <div>
+            <span className="block uppercase tracking-widest text-[9px] opacity-60 mb-0.5">Temp</span>
+            <span className="text-zinc-200">{d.temperature_c?.toFixed(1) ?? "--"} °C</span>
+          </div>
+          <div>
+            <span className="block uppercase tracking-widest text-[9px] opacity-60 mb-0.5">Humidity</span>
+            <span className="text-zinc-200">{d.humidity_rh?.toFixed(1) ?? "--"} %</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -185,7 +200,7 @@ export function VPDChart({ data, rollingAvg }: { data: VPDDataPoint[]; rollingAv
       </div>
 
       {/* Zone legend */}
-      <div className="px-6 pb-5 flex items-center gap-5 text-xs text-zinc-500">
+      <div className="px-6 pb-5 flex flex-wrap items-center gap-5 text-xs text-zinc-500">
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" /> &lt;0.4 Fungal risk
         </span>
@@ -193,7 +208,10 @@ export function VPDChart({ data, rollingAvg }: { data: VPDDataPoint[]; rollingAv
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> 0.4–1.6 Optimal
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" /> &gt;1.6 Drought
+          <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" /> 1.6–4.0 Drought
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" /> &gt;4.0 Anomaly
         </span>
       </div>
     </div>

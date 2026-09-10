@@ -66,7 +66,7 @@ interface CalibrationConfig {
 }
 
 const DEFAULT_CALIBRATION: CalibrationConfig = {
-  dryLimit: 1800,  // Absolute dry (open air reading)
+  dryLimit: 1900,  // Absolute dry (open air reading)
   wetLimit: 1000,   // Absolute wet (submerged in water reading)
 };
 
