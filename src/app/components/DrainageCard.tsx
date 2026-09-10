@@ -33,6 +33,7 @@ export type DrainCategory =
   | "well-draining"   // Retention 6–48h — healthy for most plants
   | "slow-draining"   // Retention 48–96h — moisture-loving plants
   | "waterlogged"     // Retention > 96h or no drop detected
+  | "evaluating"      // Water hasn't drained enough to classify yet
   | "no-event"        // No watering event detected in window
   | "insufficient";   // Not enough data
 
@@ -244,14 +245,7 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
     }
 
     // If we never crossed the threshold, the soil is still retaining
-    if (retentionHours === null) {
-      // Retention is "ongoing" — report elapsed time so far
-      const elapsedHrs = (latestTime - peakTime) / (1000 * 60 * 60);
-      if (elapsedHrs > 0.5) {
-        // Only mark if some time has passed — "still retaining after Xh"
-        retentionHours = null; // null = hasn't dropped yet
-      }
-    }
+    // (retentionHours remains null)
   }
 
   // 6. Classify based on retention time
@@ -304,13 +298,29 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
       };
     }
 
-    // Still retaining but not long enough to call waterlogged
+    // Under 4 hours: Just watered / Absorbing buffer
+    if (elapsedSincePeak <= 4) {
+      return {
+        ...shared,
+        category: "evaluating",
+        label: "Absorbing",
+        retentionHours: null,
+        drainClass: "unknown",
+        description: `Soil was recently watered ${Math.round(elapsedSincePeak)}h ago. Waiting for drainage to evaluate.`,
+        plantHint: "Soil is currently absorbing water.",
+        color: "#3b82f6",
+        textColor: "text-blue-400",
+        bgColor: "bg-blue-950/20",
+      };
+    }
+
+    // Between 4 and 96 hours: Still Retaining (Evaluating)
     return {
       ...shared,
-      category: "slow-draining",
+      category: "evaluating",
       label: "Still Retaining",
       retentionHours: null,
-      drainClass: "stagnant",
+      drainClass: "unknown",
       description: `Soil is still holding above ${(peakMoisture! - RETENTION_DROP).toFixed(0)}% after ${Math.round(elapsedSincePeak)}h since watering.`,
       plantHint: "Good for moisture-loving plants. Monitor for waterlogging if this persists.",
       color: "#8b5cf6",
@@ -455,6 +465,8 @@ export function DrainageCard({ data }: { data: DrainageInput[] }) {
           result.category === "well-draining"  ? "border-blue-500/25" :
           result.category === "slow-draining"  ? "border-amber-500/25" :
           result.category === "waterlogged"    ? "border-red-500/25" :
+          result.label === "Absorbing"         ? "border-blue-500/25" :
+          result.category === "evaluating"     ? "border-violet-500/25" :
                                                   "border-zinc-800/80"}
         bg-zinc-900/40`}
     >
@@ -502,11 +514,17 @@ export function DrainageCard({ data }: { data: DrainageInput[] }) {
                 ) : (
                   <>
                     <span className="text-2xl font-semibold" style={{ color: result.color }}>
-                      Still holding
+                      {result.label === "Absorbing" ? "Just watered" : "Still holding"}
                     </span>
-                    <span className="text-sm text-zinc-400">
-                      above {((result.peakMoisture ?? 0) - RETENTION_DROP).toFixed(0)}%
-                    </span>
+                    {result.label === "Absorbing" ? (
+                      <span className="text-sm text-zinc-400">
+                        evaluating drainage...
+                      </span>
+                    ) : (
+                      <span className="text-sm text-zinc-400">
+                        above {((result.peakMoisture ?? 0) - RETENTION_DROP).toFixed(0)}%
+                      </span>
+                    )}
                   </>
                 )}
               </div>
