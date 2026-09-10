@@ -14,7 +14,7 @@ type VPDClass    = "low" | "optimal" | "high" | "unknown";
 interface MicroclimatProfile {
   dliAvg:       number | null;
   dliClass:     DLIClass;
-  drainVelocity: number | null;
+  retentionHours: number | null;
   drainClass:   DrainClass;
   vpdAvg:       number | null;
   vpdClass:     VPDClass;
@@ -81,11 +81,11 @@ function classifyVPD(avg: number | null): VPDClass {
   return "high";
 }
 
-function classifyDrain(velocity: number | null): DrainClass {
-  if (velocity === null) return "unknown";
-  if (velocity > 0.5)    return "rapid";
-  if (velocity > 0.1)    return "moderate";
-  return "stagnant";
+function classifyDrain(drainClass: "rapid" | "moderate" | "stagnant" | "unknown"): DrainClass {
+  if (drainClass === "rapid")    return "rapid";
+  if (drainClass === "moderate") return "moderate";
+  if (drainClass === "stagnant") return "stagnant";
+  return "unknown";
 }
 
 // ─── Drainage slope from moisture history ─────────────────────────────────────
@@ -109,8 +109,9 @@ function computeProfile(
     ? vpdHistory.reduce((s, d) => s + d.vpd_kpa, 0) / vpdHistory.length
     : null;
 
-  // Drainage velocity
-  const drainVelocity = analyzeDrainage(drainageData).velocity;
+  // Drainage — retention-based classification
+  const drainResult = analyzeDrainage(drainageData);
+  const retentionHours = drainResult.retentionHours;
 
   // Days of data (from earliest DLI or moisture record)
   const dliDays = dliHistory.length;
@@ -126,8 +127,8 @@ function computeProfile(
   return {
     dliAvg,
     dliClass:     classifyDLI(dliAvg),
-    drainVelocity,
-    drainClass:   classifyDrain(drainVelocity),
+    retentionHours,
+    drainClass:   classifyDrain(drainResult.drainClass),
     vpdAvg,
     vpdClass:     classifyVPD(vpdAvg),
     daysOfData,
@@ -298,13 +299,13 @@ export function MicroclimatProfileCard({
         />
         <MetricRow
           icon={<Droplets className="w-4 h-4 text-emerald-400" />}
-          title="Drainage Velocity"
+          title="Water Retention"
           subtitle={isPot
-            ? "Pot drainage — rapid is expected, stagnant = check drainage holes"
-            : "Post-saturation moisture slope"
+            ? "Pot drainage — fast is expected, slow = check drainage holes"
+            : "Time to lose 10% from peak after watering"
           }
-          value={profile.drainVelocity !== null ? profile.drainVelocity.toFixed(2) : "—"}
-          unit="%/hr"
+          value={profile.retentionHours !== null ? (profile.retentionHours < 1 ? `${Math.round(profile.retentionHours * 60)}m` : profile.retentionHours.toFixed(1)) : "—"}
+          unit={profile.retentionHours !== null ? (profile.retentionHours < 1 ? "" : "hours") : ""}
           meta={DRAIN_META[profile.drainClass]}
         />
         <MetricRow

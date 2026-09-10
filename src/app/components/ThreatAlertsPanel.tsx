@@ -194,8 +194,8 @@ export function evalGrowthOptimization(
   const dliTooLow  = latestDLI !== null && latestDLI < minDli;
   const dliTooHigh = latestDLI !== null && latestDLI > maxDli;
 
-  const vel = analyzeDrainage(drainageData).velocity;
-  const drainGood = vel !== null ? vel > 0.1 : null; // not stagnant
+  const drainResult = analyzeDrainage(drainageData);
+  const drainGood = drainResult.drainClass === "rapid" || drainResult.drainClass === "moderate";
 
   const vpd7d = recentVpdAvg(vpdHistory, 7 * 24);
   const vpdOptimal = vpd7d !== null && vpd7d >= 0.8 && vpd7d <= 1.2;
@@ -224,8 +224,12 @@ export function evalGrowthOptimization(
       },
       {
         label: "Soil draining properly (not stagnant)",
-        met:   drainGood === true,
-        value: vel !== null ? `${vel.toFixed(2)} %/hr` : "No saturation event detected",
+        met:   drainGood,
+        value: drainResult.retentionHours !== null
+          ? `${drainResult.retentionHours.toFixed(1)}h retention`
+          : drainResult.category === "no-event"
+          ? "No watering event detected"
+          : "Still retaining — monitoring",
       },
       {
         label: "VPD in stable zone (0.8–1.2 kPa)",

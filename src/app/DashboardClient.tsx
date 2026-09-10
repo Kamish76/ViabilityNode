@@ -21,9 +21,10 @@ import {
 import { createClient } from "@/utils/supabase/client";
 import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
 import { VPDChart, type VPDDataPoint } from "./components/VPDChart";
+import { AtmosphericCorrelationChart } from "./components/AtmosphericCorrelationChart";
 import { DrainageCard, type DrainageInput } from "./components/DrainageCard";
 import { MicroclimatProfileCard } from "./components/MicroclimatProfileCard";
-import { 
+import {
   ThreatAlertsPanel,
   evalRotWarning,
   evalDehydrationWarning,
@@ -65,8 +66,8 @@ interface CalibrationConfig {
 }
 
 const DEFAULT_CALIBRATION: CalibrationConfig = {
-  dryLimit: 1920,
-  wetLimit: 1330,
+  dryLimit: 1900,  // Absolute dry (open air reading)
+  wetLimit: 1000,   // Absolute wet (submerged in water reading)
 };
 
 function loadCalibration(): CalibrationConfig {
@@ -99,11 +100,11 @@ function calculateVPD(tempC: number, humidityRH: number, lux: number = 0): numbe
 
   // Saturation vapor pressure at the leaf surface (using leaf temperature)
   const eSatLeaf = 0.61078 * Math.exp((17.27 * leafTempC) / (leafTempC + 237.3));
-  
+
   // Actual vapor pressure in the air (using ambient air temperature and humidity)
   const eSatAir = 0.61078 * Math.exp((17.27 * tempC) / (tempC + 237.3));
   const eActAir = eSatAir * (humidityRH / 100);
-  
+
   // VPD is the difference between leaf saturation pressure and actual air pressure.
   // We clamp to 0 in case extreme cooling/humidity causes a negative theoretical value.
   return Math.max(0, eSatLeaf - eActAir);
@@ -482,7 +483,7 @@ export function DashboardClient({
   const hasActiveThreat = rot.status === "active" || dehy.status === "active";
   const hasRisk = rot.status === "at-risk" || dehy.status === "at-risk";
   const isOptimal = growth.status === "active";
-  
+
   const viabilityStatus = hasActiveThreat ? "critical" : hasRisk ? "warning" : isOptimal ? "optimal" : "monitoring";
 
   return (
@@ -510,293 +511,296 @@ export function DashboardClient({
 
         <main className="flex-1 min-w-0 w-full py-12 md:py-20 pb-[50vh] transition-all duration-300">
 
-        {/* Header */}
-        <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
-                <Leaf className="w-6 h-6 text-emerald-400" />
+          {/* Header */}
+          <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
+                  <Leaf className="w-6 h-6 text-emerald-400" />
+                </div>
+                <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white">
+                  ViabilityNode
+                </h1>
               </div>
-              <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white">
-                ViabilityNode
-              </h1>
-            </div>
-            <p className="text-zinc-400 text-lg">
-              Real-time telemetry dashboard for plant surrogate monitors.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {/* Calibration button */}
-            <button
-              id="calibration-modal-trigger"
-              onClick={() => setShowCalibration(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 rounded-full text-sm font-medium transition-all duration-200"
-            >
-              <Settings2 className="w-4 h-4" />
-              Calibrate Sensor
-            </button>
-
-            {latest && (
-              <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900/50 border border-zinc-800 rounded-full backdrop-blur-md">
-                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-sm font-medium text-zinc-300">
-                  {formatDistanceToNow(new Date(latest.recorded_at), { addSuffix: true })}
-                </span>
-              </div>
-            )}
-          </div>
-        </header>
-
-        {!latest ? (
-          <div className="p-12 text-center rounded-3xl border border-zinc-800/50 bg-zinc-900/20 backdrop-blur-sm">
-            <Activity className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
-            <h2 className="text-xl font-medium text-white mb-2">No data available</h2>
-            <p className="text-zinc-400">
-              Waiting for telemetry logs from the surrogate node...
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-16 lg:space-y-24">
-            <div className="space-y-6">
-              <SummaryDashboard 
-                data={dailySummary} 
-                viabilityStatus={viabilityStatus}
-                plantType={currentPlantType}
-              />
-
-              {/* Sitter Mode: Active Threat Alerts */}
-              <ThreatAlertsPanel
-                drainageData={drainageData}
-                vpdHistory30={vpdHistory30}
-                dliHistory={dliHistory}
-                latestMoisture={moisturePct}
-                logs={logs}
-                placementType={placementType}
-                plantType={currentDeployment?.plant_type || null}
-              />
+              <p className="text-zinc-400 text-lg">
+                Real-time telemetry dashboard for plant surrogate monitors.
+              </p>
             </div>
 
-            {latest?.battery_pct != null && batteryWarning && (
-              <div className="flex items-center gap-3 px-5 py-3.5 rounded-2xl bg-orange-500/10 border border-orange-500/30">
-                <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0" />
-                <p className="text-sm text-orange-300">
-                  <span className="font-semibold">Low Battery Warning</span> — estimated{" "}
-                  <span className="font-semibold">{daysRemaining?.toFixed(1)} days</span>{" "}
-                  remaining before BMS cutout. Consider recharging.
-                </p>
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              {/* Calibration button */}
+              <button
+                id="calibration-modal-trigger"
+                onClick={() => setShowCalibration(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 rounded-full text-sm font-medium transition-all duration-200"
+              >
+                <Settings2 className="w-4 h-4" />
+                Calibrate Sensor
+              </button>
 
-            {/* Deployment Panel */}
-            {latest && (
-              <DeploymentPanel
-                activeDeployment={currentDeployment}
-                deploymentHistory={allDeployments}
-                deviceId={latest.device_id}
-                onDeploymentCreated={handleDeploymentCreated}
-                onDeploymentUpdated={handleDeploymentUpdated}
-              />
-            )}
+              {latest && (
+                <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900/50 border border-zinc-800 rounded-full backdrop-blur-md">
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-sm font-medium text-zinc-300">
+                    {formatDistanceToNow(new Date(latest.recorded_at), { addSuffix: true })}
+                  </span>
+                </div>
+              )}
+            </div>
+          </header>
 
-            {/* Trial Progress Card */}
-            {currentDeployment && (
-              <div id="trial-progress" className="scroll-mt-32">
-                <TrialProgressCard
-                  deployment={currentDeployment}
-                  daysRemaining={daysRemaining}
-                  currentBatteryPct={latest?.battery_pct ?? null}
-                  dliHistory={dliHistory}
+          {!latest ? (
+            <div className="p-12 text-center rounded-3xl border border-zinc-800/50 bg-zinc-900/20 backdrop-blur-sm">
+              <Activity className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
+              <h2 className="text-xl font-medium text-white mb-2">No data available</h2>
+              <p className="text-zinc-400">
+                Waiting for telemetry logs from the surrogate node...
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-16 lg:space-y-24">
+              <div className="space-y-6">
+                <SummaryDashboard
+                  data={dailySummary}
+                  viabilityStatus={viabilityStatus}
+                  plantType={currentPlantType}
+                />
+
+                {/* Sitter Mode: Active Threat Alerts */}
+                <ThreatAlertsPanel
+                  drainageData={drainageData}
                   vpdHistory30={vpdHistory30}
-                  moistureHistory={calibratedMoistureHistory}
+                  dliHistory={dliHistory}
+                  latestMoisture={moisturePct}
+                  logs={logs}
+                  placementType={placementType}
+                  plantType={currentDeployment?.plant_type || null}
                 />
               </div>
-            )}
 
-            {/* Metrics Grid */}
-            <div id="live-metrics" className="scroll-mt-32">
-              <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-4 md:gap-6">
+              {latest?.battery_pct != null && batteryWarning && (
+                <div className="flex items-center gap-3 px-5 py-3.5 rounded-2xl bg-orange-500/10 border border-orange-500/30">
+                  <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0" />
+                  <p className="text-sm text-orange-300">
+                    <span className="font-semibold">Low Battery Warning</span> — estimated{" "}
+                    <span className="font-semibold">{daysRemaining?.toFixed(1)} days</span>{" "}
+                    remaining before BMS cutout. Consider recharging.
+                  </p>
+                </div>
+              )}
 
-              <MetricCard
-                title="Temperature"
-                value={`${latest.temperature_c.toFixed(1)}°C`}
-                icon={<Thermometer className="w-5 h-5 text-orange-400" />}
-                trend={null}
-              />
+              {/* Deployment Panel */}
+              {latest && (
+                <DeploymentPanel
+                  activeDeployment={currentDeployment}
+                  deploymentHistory={allDeployments}
+                  deviceId={latest.device_id}
+                  onDeploymentCreated={handleDeploymentCreated}
+                  onDeploymentUpdated={handleDeploymentUpdated}
+                />
+              )}
 
-              <MetricCard
-                title="Humidity"
-                value={`${latest.humidity_rh.toFixed(1)}%`}
-                icon={<Droplets className="w-5 h-5 text-blue-400" />}
-                trend={null}
-              />
+              {/* Trial Progress Card */}
+              {currentDeployment && (
+                <div id="trial-progress" className="scroll-mt-32">
+                  <TrialProgressCard
+                    deployment={currentDeployment}
+                    daysRemaining={daysRemaining}
+                    currentBatteryPct={latest?.battery_pct ?? null}
+                    dliHistory={dliHistory}
+                    vpdHistory30={vpdHistory30}
+                    moistureHistory={calibratedMoistureHistory}
+                  />
+                </div>
+              )}
 
-              <MetricCard
-                title="VPD"
-                value={latest.vpd_kpa ? `${latest.vpd_kpa.toFixed(2)} kPa` : "N/A"}
-                icon={<Wind className="w-5 h-5 text-teal-400" />}
-                trend={null}
-              />
+              {/* Metrics Grid */}
+              <div id="live-metrics" className="scroll-mt-32">
+                <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-4 md:gap-6">
 
-              {/* ── Phase 1.1: Calibrated Soil Moisture ── */}
-              <MetricCard
-                title="Soil Moisture"
-                value={moisturePct !== null ? `${moisturePct.toFixed(1)}%` : "—"}
-                subtitle={`Raw ADC: ${latest.soil_moisture_raw}`}
-                icon={<Droplets className="w-5 h-5 text-emerald-400" />}
-                trend={null}
-                accentColor="emerald"
-                barValue={moisturePct ?? 0}
-              />
+                  <MetricCard
+                    title="Temperature"
+                    value={`${latest.temperature_c.toFixed(1)}°C`}
+                    icon={<Thermometer className="w-5 h-5 text-orange-400" />}
+                    trend={null}
+                  />
 
-              <MetricCard
-                title="Illuminance"
-                value={`${latest.illuminance_lux} lx`}
-                icon={<Sun className="w-5 h-5 text-yellow-400" />}
-                trend={null}
-              />
+                  <MetricCard
+                    title="Humidity"
+                    value={`${latest.humidity_rh.toFixed(1)}%`}
+                    icon={<Droplets className="w-5 h-5 text-blue-400" />}
+                    trend={null}
+                  />
 
-              {/* ── Phase 1.2: Battery Autonomy ── */}
-              <BatteryCard
-                pct={latest.battery_pct}
-                voltage={latest.battery_v}
-                daysRemaining={daysRemaining}
-                warning={batteryWarning}
-              />
+                  <MetricCard
+                    title="VPD"
+                    value={latest.vpd_kpa ? `${latest.vpd_kpa.toFixed(2)} kPa` : "N/A"}
+                    icon={<Wind className="w-5 h-5 text-teal-400" />}
+                    trend={null}
+                  />
 
-            </div>
-            </div>
+                  {/* ── Phase 1.1: Calibrated Soil Moisture ── */}
+                  <MetricCard
+                    title="Soil Moisture"
+                    value={moisturePct !== null ? `${moisturePct.toFixed(1)}%` : "—"}
+                    subtitle={`Raw ADC: ${latest.soil_moisture_raw}`}
+                    icon={<Droplets className="w-5 h-5 text-emerald-400" />}
+                    trend={null}
+                    accentColor="emerald"
+                    barValue={moisturePct ?? 0}
+                  />
 
-            {/* Calibration info strip */}
-            <div className="flex items-center justify-between px-5 py-3 rounded-2xl bg-zinc-900/60 border border-zinc-800/60 text-xs text-zinc-500">
-              <div className="flex items-center gap-2">
-                <FlaskConical className="w-3.5 h-3.5 text-amber-500/70" />
-                <span>
-                  Soil calibration:{" "}
-                  <span className="text-zinc-400 font-mono">
-                    Dry={calibration.dryLimit} / Wet={calibration.wetLimit}
-                  </span>
-                </span>
+                  <MetricCard
+                    title="Illuminance"
+                    value={`${latest.illuminance_lux} lx`}
+                    icon={<Sun className="w-5 h-5 text-yellow-400" />}
+                    trend={null}
+                  />
+
+                  {/* ── Phase 1.2: Battery Autonomy ── */}
+                  <BatteryCard
+                    pct={latest.battery_pct}
+                    voltage={latest.battery_v}
+                    daysRemaining={daysRemaining}
+                    warning={batteryWarning}
+                  />
+
+                </div>
               </div>
-              <button
-                onClick={() => setShowCalibration(true)}
-                className="text-amber-500/70 hover:text-amber-400 transition-colors underline underline-offset-2"
-              >
-                Adjust
-              </button>
-            </div>
 
-            {/* ════════════════════════════════════════
+              {/* Calibration info strip */}
+              <div className="flex items-center justify-between px-5 py-3 rounded-2xl bg-zinc-900/60 border border-zinc-800/60 text-xs text-zinc-500">
+                <div className="flex items-center gap-2">
+                  <FlaskConical className="w-3.5 h-3.5 text-amber-500/70" />
+                  <span>
+                    Soil calibration:{" "}
+                    <span className="text-zinc-400 font-mono">
+                      Dry={calibration.dryLimit} / Wet={calibration.wetLimit}
+                    </span>
+                  </span>
+                </div>
+                <button
+                  onClick={() => setShowCalibration(true)}
+                  className="text-amber-500/70 hover:text-amber-400 transition-colors underline underline-offset-2"
+                >
+                  Adjust
+                </button>
+              </div>
+
+              {/* ════════════════════════════════════════
                  PHASE 2 — Biophysical Analytics
                 ════════════════════════════════════════ */}
-            <div id="analytics" className="space-y-6 scroll-mt-32">
-              <div className="flex items-center gap-3 pt-2">
-                <div className="h-px flex-1 bg-zinc-800" />
-                <span className="text-xs font-medium text-zinc-500 uppercase tracking-widest px-3">
-                  Biophysical Analytics
-                </span>
-                <div className="h-px flex-1 bg-zinc-800" />
+              <div id="analytics" className="space-y-6 scroll-mt-32">
+                <div className="flex items-center gap-3 pt-2">
+                  <div className="h-px flex-1 bg-zinc-800" />
+                  <span className="text-xs font-medium text-zinc-500 uppercase tracking-widest px-3">
+                    Biophysical Analytics
+                  </span>
+                  <div className="h-px flex-1 bg-zinc-800" />
+                </div>
+
+                {/* 3.0 — Microclimate Profile Card (Phase 3) */}
+                <MicroclimatProfileCard
+                  dliHistory={dliHistory}
+                  vpdHistory30={vpdHistory30}
+                  drainageData={drainageData}
+                  placementType={placementType}
+                />
+
+                {/* 2.1 — Daily Light Integral */}
+                <DLIChart data={dliHistory} />
+
+                {/* 2-col row: VPD trend + Drainage */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* 2.3 — VPD 7-day rolling */}
+                  <VPDChart data={vpdHistory} rollingAvg={vpdRollingAvg} />
+
+                  {/* 2.2 — Soil Drainage Velocity */}
+                  <DrainageCard data={drainageData} />
+                </div>
+
+                {/* 2.4 — Atmospheric Correlation */}
+                <AtmosphericCorrelationChart logs={logs} />
               </div>
 
-              {/* 3.0 — Microclimate Profile Card (Phase 3) */}
-              <MicroclimatProfileCard
-                dliHistory={dliHistory}
-                vpdHistory30={vpdHistory30}
-                drainageData={drainageData}
-                placementType={placementType}
-              />
-
-              {/* 2.1 — Daily Light Integral */}
-              <DLIChart data={dliHistory} />
-
-              {/* 2-col row: VPD trend + Drainage */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* 2.3 — VPD 7-day rolling */}
-                <VPDChart data={vpdHistory} rollingAvg={vpdRollingAvg} />
-
-                {/* 2.2 — Soil Drainage Velocity */}
-                <DrainageCard data={drainageData} />
+              {/* Log Table */}
+              <div id="live-logs" className="mt-4 rounded-3xl border border-zinc-800/80 bg-zinc-900/40 backdrop-blur-xl overflow-hidden shadow-2xl scroll-mt-32">
+                <div className="px-6 py-5 border-b border-zinc-800 flex items-center justify-between">
+                  <h3 className="text-lg font-medium text-white flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-zinc-400" />
+                    Live Telemetry Logs
+                  </h3>
+                  <CopyLogsButton logs={logs} />
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="text-xs text-zinc-400 uppercase bg-zinc-900/50 border-b border-zinc-800">
+                      <tr>
+                        <th className="px-6 py-4 font-medium">Time</th>
+                        <th className="px-6 py-4 font-medium">Device</th>
+                        <th className="px-6 py-4 font-medium text-right">Temp</th>
+                        <th className="px-6 py-4 font-medium text-right">Humidity</th>
+                        <th className="px-6 py-4 font-medium text-right">VPD</th>
+                        <th className="px-6 py-4 font-medium text-right">Soil %</th>
+                        <th className="px-6 py-4 font-medium text-right">Light</th>
+                        <th className="px-6 py-4 font-medium text-right">Battery</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/50">
+                      {logs.map((log) => {
+                        const mPct = calculateMoisturePct(log.soil_moisture_raw, calibration);
+                        return (
+                          <tr key={log.id} className="hover:bg-zinc-800/30 transition-colors">
+                            <td className="px-6 py-3 text-zinc-300 whitespace-nowrap">
+                              {new Date(log.recorded_at).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit",
+                              })}
+                              <span className="text-zinc-600 text-xs ml-2 hidden md:inline">
+                                {new Date(log.recorded_at).toLocaleDateString()}
+                              </span>
+                            </td>
+                            <td className="px-6 py-3 text-zinc-500 font-mono text-xs">
+                              {log.device_id.split("-")[0] || log.device_id}
+                            </td>
+                            <td className="px-6 py-3 text-right text-zinc-200">
+                              {log.temperature_c.toFixed(1)}°
+                            </td>
+                            <td className="px-6 py-3 text-right text-zinc-200">
+                              {log.humidity_rh.toFixed(1)}%
+                            </td>
+                            <td className="px-6 py-3 text-right text-teal-400/80">
+                              {log.vpd_kpa ? log.vpd_kpa.toFixed(2) : "-"}
+                            </td>
+                            <td className="px-6 py-3 text-right">
+                              <span
+                                className="font-medium"
+                                style={{
+                                  color: `hsl(${140 + mPct * 0.8}, 65%, 55%)`,
+                                }}
+                              >
+                                {mPct.toFixed(1)}%
+                              </span>
+                              <span className="text-zinc-600 text-xs ml-1">
+                                ({log.soil_moisture_raw})
+                              </span>
+                            </td>
+                            <td className="px-6 py-3 text-right text-zinc-200">
+                              {log.illuminance_lux}
+                            </td>
+                            <td className="px-6 py-3 text-right text-zinc-400">
+                              {log.battery_pct != null ? `${log.battery_pct}%` : "-"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-
-            {/* Log Table */}
-            <div id="live-logs" className="mt-4 rounded-3xl border border-zinc-800/80 bg-zinc-900/40 backdrop-blur-xl overflow-hidden shadow-2xl scroll-mt-32">
-              <div className="px-6 py-5 border-b border-zinc-800 flex items-center justify-between">
-                <h3 className="text-lg font-medium text-white flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-zinc-400" />
-                  Live Telemetry Logs
-                </h3>
-                <CopyLogsButton logs={logs} />
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="text-xs text-zinc-400 uppercase bg-zinc-900/50 border-b border-zinc-800">
-                    <tr>
-                      <th className="px-6 py-4 font-medium">Time</th>
-                      <th className="px-6 py-4 font-medium">Device</th>
-                      <th className="px-6 py-4 font-medium text-right">Temp</th>
-                      <th className="px-6 py-4 font-medium text-right">Humidity</th>
-                      <th className="px-6 py-4 font-medium text-right">VPD</th>
-                      <th className="px-6 py-4 font-medium text-right">Soil %</th>
-                      <th className="px-6 py-4 font-medium text-right">Light</th>
-                      <th className="px-6 py-4 font-medium text-right">Battery</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-800/50">
-                    {logs.map((log) => {
-                      const mPct = calculateMoisturePct(log.soil_moisture_raw, calibration);
-                      return (
-                        <tr key={log.id} className="hover:bg-zinc-800/30 transition-colors">
-                          <td className="px-6 py-3 text-zinc-300 whitespace-nowrap">
-                            {new Date(log.recorded_at).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              second: "2-digit",
-                            })}
-                            <span className="text-zinc-600 text-xs ml-2 hidden md:inline">
-                              {new Date(log.recorded_at).toLocaleDateString()}
-                            </span>
-                          </td>
-                          <td className="px-6 py-3 text-zinc-500 font-mono text-xs">
-                            {log.device_id.split("-")[0] || log.device_id}
-                          </td>
-                          <td className="px-6 py-3 text-right text-zinc-200">
-                            {log.temperature_c.toFixed(1)}°
-                          </td>
-                          <td className="px-6 py-3 text-right text-zinc-200">
-                            {log.humidity_rh.toFixed(1)}%
-                          </td>
-                          <td className="px-6 py-3 text-right text-teal-400/80">
-                            {log.vpd_kpa ? log.vpd_kpa.toFixed(2) : "-"}
-                          </td>
-                          <td className="px-6 py-3 text-right">
-                            <span
-                              className="font-medium"
-                              style={{
-                                color: `hsl(${140 + mPct * 0.8}, 65%, 55%)`,
-                              }}
-                            >
-                              {mPct.toFixed(1)}%
-                            </span>
-                            <span className="text-zinc-600 text-xs ml-1">
-                              ({log.soil_moisture_raw})
-                            </span>
-                          </td>
-                          <td className="px-6 py-3 text-right text-zinc-200">
-                            {log.illuminance_lux}
-                          </td>
-                          <td className="px-6 py-3 text-right text-zinc-400">
-                            {log.battery_pct != null ? `${log.battery_pct}%` : "-"}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
+          )}
         </main>
       </div>
     </div>
@@ -877,8 +881,8 @@ function BatteryCard({
   const color = warning
     ? "text-orange-400"
     : pct != null && pct < 30
-    ? "text-yellow-400"
-    : "text-green-400";
+      ? "text-yellow-400"
+      : "text-green-400";
 
   return (
     <div
@@ -932,8 +936,8 @@ function BatteryCard({
                 backgroundColor: warning
                   ? "rgb(251 146 60)"
                   : pct < 30
-                  ? "rgb(250 204 21)"
-                  : "rgb(74 222 128)",
+                    ? "rgb(250 204 21)"
+                    : "rgb(74 222 128)",
               }}
             />
           </div>
