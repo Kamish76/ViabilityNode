@@ -21,6 +21,7 @@ import {
 import { createClient } from "@/utils/supabase/client";
 import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
 import { VPDChart, type VPDDataPoint } from "./components/VPDChart";
+import { AtmosphericCorrelationChart } from "./components/AtmosphericCorrelationChart";
 import { DrainageCard, type DrainageInput } from "./components/DrainageCard";
 import { MicroclimatProfileCard } from "./components/MicroclimatProfileCard";
 import {
@@ -717,6 +718,9 @@ export function DashboardClient({
                   {/* 2.2 — Soil Drainage Velocity */}
                   <DrainageCard data={drainageData} />
                 </div>
+
+                {/* 2.4 — Atmospheric Correlation */}
+                <AtmosphericCorrelationChart logs={logs} />
               </div>
 
               {/* Log Table */}
