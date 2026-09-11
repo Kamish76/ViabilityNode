@@ -635,6 +635,7 @@ export function DashboardClient({
                   <MetricCard
                     title="VPD"
                     value={latest.vpd_kpa ? `${latest.vpd_kpa.toFixed(2)} kPa` : "N/A"}
+                    subtitle={dailySummary.previous?.vpd != null ? `Prev Day Avg: ${dailySummary.previous.vpd.toFixed(2)} kPa` : undefined}
                     icon={<Wind className="w-5 h-5 text-teal-400" />}
                     trend={null}
                   />
