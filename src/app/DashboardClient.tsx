@@ -134,15 +134,58 @@ function estimateBatteryDays(
     (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
   );
 
-  const oldest = sorted[0];
-  const newest = sorted[sorted.length - 1];
-  const pctDrop = (oldest.battery_pct ?? 0) - (newest.battery_pct ?? 0);
-  const msElapsed =
-    new Date(newest.recorded_at).getTime() -
-    new Date(oldest.recorded_at).getTime();
+  // Add current live point for the most up-to-date calculation
+  const lastTime = new Date(sorted[sorted.length - 1].recorded_at).getTime();
+  if (Date.now() - lastTime > 1000 * 60 * 60) {
+    sorted.push({ recorded_at: new Date().toISOString(), battery_pct: currentPct });
+  }
+
+  let currentCycle: BatterySnapshot[] = [];
+  let bestCycle: BatterySnapshot[] = [];
+
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const pt = sorted[i];
+    if (currentCycle.length === 0) {
+      currentCycle.push(pt);
+    } else {
+      const prevPt = currentCycle[currentCycle.length - 1]; // chronologically newer point
+      // If the older point (pt) has a higher or roughly equal battery, it's part of the discharge cycle.
+      // We allow a small 2% margin for temperature fluctuations or ADC noise.
+      if (pt.battery_pct >= prevPt.battery_pct - 2) {
+        currentCycle.push(pt);
+      } else {
+        // A recharge or battery swap happened! The battery percentage went UP significantly between `pt` and `prevPt`.
+        const chronologicalCycle = [...currentCycle].reverse();
+        const cycleDays = (new Date(chronologicalCycle[chronologicalCycle.length - 1].recorded_at).getTime() - new Date(chronologicalCycle[0].recorded_at).getTime()) / (1000 * 60 * 60 * 24);
+        
+        // If this post-recharge cycle is long enough (> 12 hours) and has a valid drop, we use it!
+        if (cycleDays >= 0.5 && chronologicalCycle[0].battery_pct - chronologicalCycle[chronologicalCycle.length - 1].battery_pct > 0) {
+          bestCycle = chronologicalCycle;
+          break;
+        }
+        
+        // Otherwise, it's too short to get a good rate, so we skip it and look at the PREVIOUS cycle.
+        currentCycle = [pt];
+      }
+    }
+  }
+
+  if (bestCycle.length === 0) {
+    const chronologicalCycle = [...currentCycle].reverse();
+    if (chronologicalCycle.length >= 2) {
+      bestCycle = chronologicalCycle;
+    }
+  }
+
+  if (bestCycle.length < 2) return null;
+
+  const oldest = bestCycle[0];
+  const newest = bestCycle[bestCycle.length - 1];
+  const pctDrop = oldest.battery_pct - newest.battery_pct;
+  const msElapsed = new Date(newest.recorded_at).getTime() - new Date(oldest.recorded_at).getTime();
   const daysElapsed = msElapsed / (1000 * 60 * 60 * 24);
 
-  if (pctDrop <= 0 || daysElapsed <= 0) return null; // charging or no data
+  if (pctDrop <= 0 || daysElapsed <= 0) return null;
 
   const dropPerDay = pctDrop / daysElapsed;
   return currentPct / dropPerDay;
