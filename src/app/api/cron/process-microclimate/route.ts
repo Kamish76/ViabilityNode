@@ -125,12 +125,16 @@ async function handleRequest(req: Request) {
         moisture_pct: r.soil_moisture_raw,
       }));
 
-      // In DrainageCard.ts, raw moisture is calibrated. We will just assume it's calibrated here
-      // or we apply a simple clamp if it's already 0-100.
-      const calibratedMoisture = drainageInput.map(d => ({
-        recorded_at: d.recorded_at,
-        moisture_pct: Math.min(100, Math.max(0, d.moisture_pct)),
-      }));
+      // Apply fixed hardware calibration limits (1920=dry, 880=wet)
+      const DRY_LIMIT = 1920;
+      const WET_LIMIT = 880;
+      const calibratedMoisture = drainageInput.map(d => {
+        let pct = ((DRY_LIMIT - d.moisture_pct) / (DRY_LIMIT - WET_LIMIT)) * 100;
+        return {
+          recorded_at: d.recorded_at,
+          moisture_pct: Math.max(0, Math.min(100, pct)),
+        };
+      });
 
       const piecewise = analyzePiecewiseDrainage(calibratedMoisture);
 

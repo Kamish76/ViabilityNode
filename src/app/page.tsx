@@ -162,7 +162,7 @@ export default async function DashboardPage() {
       .from("telemetry")
       .select("recorded_at, soil_moisture_raw")
       .eq("device_id", deviceId)
-      .gte("recorded_at", sevenDaysAgo.toISOString())
+      .gte("recorded_at", thirtyDaysAgo.toISOString())
       .order("recorded_at", { ascending: true })
       .limit(5000);
 
@@ -232,7 +232,6 @@ export default async function DashboardPage() {
       activeDeployment={activeDeployment}
       deploymentHistory={deploymentHistory}
       dailySummary={dailySummary}
-      initialDeviceSettings={deviceSettings}
       microclimateProfile={microclimateProfile}
     />
   );

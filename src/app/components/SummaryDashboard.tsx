@@ -51,12 +51,12 @@ ${data.previous ? `- Temp: ${data.previous.temp.toFixed(1)}°C
 - Moisture (Raw): ${data.previous.moistureRaw.toFixed(0)}` : 'N/A'}
 
 ${drainageData && piecewiseResult ? (() => {
-  const drainageResult = analyzeDrainage(drainageData);
+  const drainageResult = analyzeDrainage(drainageData, plantType);
   return `Soil Drainage & Analytics:
 - Status: ${drainageResult.label}
 - Retention Time: ${drainageResult.retentionHours !== null ? drainageResult.retentionHours + 'h' : 'N/A'}
 - 24h Change: ${drainageResult.netChange24h !== null ? (drainageResult.netChange24h > 0 ? '+' : '') + drainageResult.netChange24h + '%' : 'N/A'}
-- Watering Events (5d): ${drainageResult.wateringEvents}
+- Watering Events: ${drainageResult.wateringEvents}
 - V_grav: ${piecewiseResult.vGrav !== null ? piecewiseResult.vGrav.toFixed(2) + ' %/hr' : 'N/A'}
 - V_dry: ${piecewiseResult.vDry !== null ? piecewiseResult.vDry.toFixed(2) + ' %/hr' : 'N/A'}
 - Macropore Failure: ${piecewiseResult.phase1Failure ? 'Yes' : 'No'}

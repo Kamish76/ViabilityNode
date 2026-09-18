@@ -259,8 +259,15 @@ export function evalGrowthOptimization(
   const dliTooLow  = latestDLI !== null && latestDLI < minDli;
   const dliTooHigh = latestDLI !== null && latestDLI > maxDli;
 
-  const drainResult = analyzeDrainage(drainageData);
-  const drainGood = drainResult.drainClass === "rapid" || drainResult.drainClass === "moderate";
+  const drainResult = analyzeDrainage(drainageData, plantType);
+  let drainGood = drainResult.drainClass === "rapid" || drainResult.drainClass === "moderate";
+
+  const isSucculent = plantType === "succulent" || plantType === "cactus";
+  const isOptimalDry = isSucculent && (drainResult.category === "no-event" || (drainResult.currentMoisture !== null && drainResult.currentMoisture < 30));
+
+  if (isOptimalDry) {
+    drainGood = true;
+  }
 
   const vpd7d = recentVpdAvg(vpdHistory, 7 * 24);
   const vpdOptimal = vpd7d !== null && vpd7d >= 0.8 && vpd7d <= 1.2;
@@ -288,9 +295,11 @@ export function evalGrowthOptimization(
           : "No DLI data yet",
       },
       {
-        label: "Soil draining properly (not stagnant)",
+        label: isSucculent ? "Soil properly draining or in optimal dry phase" : "Soil draining properly (not stagnant)",
         met:   drainGood,
-        value: drainResult.retentionHours !== null
+        value: isOptimalDry
+          ? `Optimal dry state (${drainResult.currentMoisture?.toFixed(0) ?? 0}%)`
+          : drainResult.retentionHours !== null
           ? `${drainResult.retentionHours.toFixed(1)}h retention`
           : drainResult.category === "no-event"
           ? "No watering event detected"
