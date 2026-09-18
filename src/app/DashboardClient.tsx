@@ -123,13 +123,13 @@ function estimateBatteryDays(
         // A recharge or battery swap happened! The battery percentage went UP significantly between `pt` and `prevPt`.
         const chronologicalCycle = [...currentCycle].reverse();
         const cycleDays = (new Date(chronologicalCycle[chronologicalCycle.length - 1].recorded_at).getTime() - new Date(chronologicalCycle[0].recorded_at).getTime()) / (1000 * 60 * 60 * 24);
-        
+
         // If this post-recharge cycle is long enough (> 12 hours) and has a valid drop, we use it!
         if (cycleDays >= 0.5 && chronologicalCycle[0].battery_pct - chronologicalCycle[chronologicalCycle.length - 1].battery_pct > 0) {
           bestCycle = chronologicalCycle;
           break;
         }
-        
+
         // Otherwise, it's too short to get a good rate, so we skip it and look at the PREVIOUS cycle.
         currentCycle = [pt];
       }
@@ -293,9 +293,9 @@ export function DashboardClient({
   const historicalVpd = vpdHistory7.filter(d => new Date(d.recorded_at).getTime() < endOfYesterdayMs);
   const historicalDli = dliHistory.filter(d => new Date(d.day).getTime() < endOfYesterdayMs);
   const historicalLogs = logs.filter(l => new Date(l.recorded_at).getTime() < endOfYesterdayMs);
-  
-  const historicalLatestMoisture = historicalDrainageData.length > 0 
-    ? historicalDrainageData[historicalDrainageData.length - 1].moisture_pct 
+
+  const historicalLatestMoisture = historicalDrainageData.length > 0
+    ? historicalDrainageData[historicalDrainageData.length - 1].moisture_pct
     : null;
 
   // Phase 4.5: Piecewise segmented drainage analysis
@@ -378,6 +378,79 @@ export function DashboardClient({
                   piecewiseResult={piecewiseResult}
                 />
 
+                {/* Metrics Grid */}
+                <div id="live-metrics" className="scroll-mt-32 space-y-6">
+                  <div className="flex items-center gap-3 pt-2">
+                    <div className="h-px flex-1 bg-zinc-800" />
+                    <span className="text-xs font-medium text-zinc-500 uppercase tracking-widest px-3">
+                      Live Metrics
+                    </span>
+                    <div className="h-px flex-1 bg-zinc-800" />
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-4 md:gap-6">
+
+                    <MetricCard
+                      title="Temperature"
+                      value={`${latest.temperature_c.toFixed(1)}°C`}
+                      icon={<Thermometer className="w-5 h-5 text-orange-400" />}
+                      trend={null}
+                    />
+
+                    <MetricCard
+                      title="Humidity"
+                      value={`${latest.humidity_rh.toFixed(1)}%`}
+                      icon={<Droplets className="w-5 h-5 text-blue-400" />}
+                      trend={null}
+                    />
+
+                    <MetricCard
+                      title="VPD"
+                      value={latest.vpd_kpa ? `${latest.vpd_kpa.toFixed(2)} kPa` : "N/A"}
+                      subtitle={dailySummary.previous?.vpd != null ? `Prev Day Avg: ${dailySummary.previous.vpd.toFixed(2)} kPa` : undefined}
+                      icon={<Wind className="w-5 h-5 text-teal-400" />}
+                      trend={null}
+                    />
+
+                    {/* ── Phase 1.1: Calibrated Soil Moisture ── */}
+                    <MetricCard
+                      title="Soil Moisture"
+                      value={moisturePct !== null ? `${moisturePct.toFixed(1)}%` : "—"}
+                      subtitle={`Raw ADC: ${latest.soil_moisture_raw}`}
+                      icon={<Droplets className="w-5 h-5 text-emerald-400" />}
+                      trend={null}
+                      accentColor="emerald"
+                      barValue={moisturePct ?? 0}
+                    />
+
+                    <MetricCard
+                      title="Illuminance"
+                      value={`${latest.illuminance_lux} lx`}
+                      icon={<Sun className="w-5 h-5 text-yellow-400" />}
+                      trend={null}
+                    />
+
+                    {/* ── Phase 1.2: Battery Autonomy ── */}
+                    <BatteryCard
+                      pct={latest.battery_pct}
+                      voltage={latest.battery_v}
+                      daysRemaining={daysRemaining}
+                      warning={batteryWarning}
+                    />
+
+                  </div>
+                </div>
+
+                {/* Deployment Panel */}
+                {latest && (
+                  <DeploymentPanel
+                    activeDeployment={currentDeployment}
+                    deploymentHistory={allDeployments}
+                    deviceId={latest.device_id}
+                    onDeploymentCreated={handleDeploymentCreated}
+                    onDeploymentUpdated={handleDeploymentUpdated}
+                  />
+                )}
+
                 {/* Sitter Mode: Active Threat Alerts */}
                 <ThreatAlertsPanel
                   drainageData={historicalDrainageData}
@@ -403,17 +476,6 @@ export function DashboardClient({
                 </div>
               )}
 
-              {/* Deployment Panel */}
-              {latest && (
-                <DeploymentPanel
-                  activeDeployment={currentDeployment}
-                  deploymentHistory={allDeployments}
-                  deviceId={latest.device_id}
-                  onDeploymentCreated={handleDeploymentCreated}
-                  onDeploymentUpdated={handleDeploymentUpdated}
-                />
-              )}
-
               {/* Trial Progress Card */}
               {currentDeployment && (
                 <div id="trial-progress" className="scroll-mt-32">
@@ -427,61 +489,6 @@ export function DashboardClient({
                   />
                 </div>
               )}
-
-              {/* Metrics Grid */}
-              <div id="live-metrics" className="scroll-mt-32">
-                <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-4 md:gap-6">
-
-                  <MetricCard
-                    title="Temperature"
-                    value={`${latest.temperature_c.toFixed(1)}°C`}
-                    icon={<Thermometer className="w-5 h-5 text-orange-400" />}
-                    trend={null}
-                  />
-
-                  <MetricCard
-                    title="Humidity"
-                    value={`${latest.humidity_rh.toFixed(1)}%`}
-                    icon={<Droplets className="w-5 h-5 text-blue-400" />}
-                    trend={null}
-                  />
-
-                  <MetricCard
-                    title="VPD"
-                    value={latest.vpd_kpa ? `${latest.vpd_kpa.toFixed(2)} kPa` : "N/A"}
-                    subtitle={dailySummary.previous?.vpd != null ? `Prev Day Avg: ${dailySummary.previous.vpd.toFixed(2)} kPa` : undefined}
-                    icon={<Wind className="w-5 h-5 text-teal-400" />}
-                    trend={null}
-                  />
-
-                  {/* ── Phase 1.1: Calibrated Soil Moisture ── */}
-                  <MetricCard
-                    title="Soil Moisture"
-                    value={moisturePct !== null ? `${moisturePct.toFixed(1)}%` : "—"}
-                    subtitle={`Raw ADC: ${latest.soil_moisture_raw}`}
-                    icon={<Droplets className="w-5 h-5 text-emerald-400" />}
-                    trend={null}
-                    accentColor="emerald"
-                    barValue={moisturePct ?? 0}
-                  />
-
-                  <MetricCard
-                    title="Illuminance"
-                    value={`${latest.illuminance_lux} lx`}
-                    icon={<Sun className="w-5 h-5 text-yellow-400" />}
-                    trend={null}
-                  />
-
-                  {/* ── Phase 1.2: Battery Autonomy ── */}
-                  <BatteryCard
-                    pct={latest.battery_pct}
-                    voltage={latest.battery_v}
-                    daysRemaining={daysRemaining}
-                    warning={batteryWarning}
-                  />
-
-                </div>
-              </div>
 
 
 
