@@ -601,7 +601,7 @@ function PiecewiseVelocities({
     <div className="grid grid-cols-2 gap-3">
       {/* V_grav — Gravitational Clearance Rate */}
       <div className={`rounded-xl border bg-zinc-800/20 px-3 py-2.5 ${
-        piecewise.phase1Failure ? "border-red-500/40" : "border-zinc-800/60"
+        piecewise.phase1Failure || piecewise.phase2Failure ? "border-red-500/40" : "border-zinc-800/60"
       }`}>
         <div className="flex items-center gap-1.5 mb-1">
           <Gauge className="w-3 h-3 text-blue-400" />
@@ -627,10 +627,18 @@ function PiecewiseVelocities({
             Macropore failure
           </p>
         )}
+        {piecewise.phase2Failure && !piecewise.phase1Failure && (
+          <p className="text-[10px] text-red-400 mt-1 flex items-center gap-1">
+            <AlertTriangle className="w-2.5 h-2.5" />
+            Waterlogged (Phase 2 &gt;96h)
+          </p>
+        )}
       </div>
 
       {/* V_dry — Transpiration / Drying Rate */}
-      <div className="rounded-xl border border-zinc-800/60 bg-zinc-800/20 px-3 py-2.5">
+      <div className={`rounded-xl border bg-zinc-800/20 px-3 py-2.5 ${
+        piecewise.alan_interference || piecewise.phase3Warning ? "border-amber-500/40" : "border-zinc-800/60"
+      }`}>
         <div className="flex items-center gap-1.5 mb-1">
           <Wind className="w-3 h-3 text-amber-400" />
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">V<sub>dry</sub></span>
@@ -649,6 +657,18 @@ function PiecewiseVelocities({
             ? `In Phase 3 for ${piecewise.phase3DurationHours.toFixed(1)}h`
             : "Measuring..."}
         </p>
+        {piecewise.phase3Warning && (
+          <p className="text-[10px] text-amber-500 mt-1 flex items-center gap-1">
+            <AlertTriangle className="w-2.5 h-2.5" />
+            High demand (rapid loss)
+          </p>
+        )}
+        {piecewise.alan_interference && (
+          <p className="text-[10px] text-amber-500 mt-1 flex items-center gap-1">
+            <AlertTriangle className="w-2.5 h-2.5" />
+            ALAN interference
+          </p>
+        )}
       </div>
     </div>
   );

@@ -56,7 +56,7 @@ interface DrainageInput {
 | `raw` | Raw ADC integer from the hardware sensor. |
 
 ### Calibration Pipeline
-Before ingestion, the raw ADC counts are transformed into `moisture_pct` using the hardware calibration constants (`Dry=1910` / `Wet=1100`):
+Before ingestion, the raw ADC counts are transformed into `moisture_pct` using the hardware calibration constants (`Dry=1920` / `Wet=880`). Setting the dry ceiling at 1920 (above the typical 1916 open-air spike) is a critical guard against the UI rendering negative moisture percentages:
 
 $$ \text{moisture\_pct} = \left( \frac{\text{ADC}_{\text{dry}} - \text{ADC}_{\text{raw}}}{\text{ADC}_{\text{dry}} - \text{ADC}_{\text{wet}}} \right) \times 100 $$
 
@@ -227,7 +227,7 @@ V_dry = (50% − 30%) / (t_30% − t_50%)   [%/hr]
 ```
 Measures the slower capillary/ET-driven drying once gravitational drainage is exhausted. **Only computed when soil crosses both 50% and 30%.**
 
-Cross-referencing atmospheric drying power (`vpd_kpa`) allows distinguishing between stagnant soil drainage vs. low ambient evaporation demand (optimal range 0.4–1.6 kPa). Optional `vpd_kpa` and DLI light values validate capillary drying rates against atmospheric demand.
+Cross-referencing atmospheric drying power (`vpd_kpa`) allows distinguishing between stagnant soil drainage vs. low ambient evaporation demand (optimal range 0.4–1.6 kPa). Additionally, the system incorporates the impact of Botanical Light Pollution (Artificial Light at Night/ALAN). Research by Ian Ashdown (2016) indicates that red (660nm) and far-red (730nm) light from modern LEDs can interfere with the phytochrome switch (P_r to P_{fr} isoforms), keeping stomata open or closed unnaturally. This interference can skew the calculated V_dry and signal false transpiration demand.
 
 Interpretation:
 | V<sub>dry</sub> | Visual Color | Meaning |
@@ -261,6 +261,7 @@ This indicates **anoxia risk** — the soil's macropores are not draining, which
 | `phase1Failure` | `boolean` | True if macropore failure detected |
 | `hoursAbove70` | `number \| null` | Continuous hours above 70% (null if not in Phase 1) |
 | `vpd_kpa` | `number \| null` | Optional environmental input to correlate with capillary drying rate |
+| `alan_interference` | `boolean` | True if Botanical Light Pollution (ALAN) is detected |
 | `drainClass` | `"rapid" \| "moderate" \| "stagnant" \| "unknown"` | Backward-compatible classification |
 | `retentionHours` | `number \| null` | Backward-compat: same as analyzeDrainage's retention |
 | `wateringEvents` | `number` | Count of detected events |
@@ -494,7 +495,17 @@ Time     Moisture%    What happens
 
 ---
 
-## 14. Exports Summary
+## 14. Literature References
+
+- **Cornell University CALS (NRCCA)**: Competency Area 2: Soil Hydrology. Basis for Field Capacity and Available Water Capacity thresholds.
+- **FAO (Food and Agriculture Organization)**: Field Measurements and Infiltration functions based on the Kostiakov-Lewis relationships.
+- **AHDB**: Standards for rootzone management, containerized crop drainage, and anoxia prevention.
+- **Ian Ashdown (2016)**: *Botanical Light Pollution*. Details the impact of spectral power distribution on the phytochrome switch.
+- **Correa-Cano et al. (2018)**: *Erosion of natural darkness in the geographic ranges of cacti*.
+
+---
+
+## 15. Exports Summary
 
 | Export | Type | Description |
 |--------|------|-------------|

@@ -80,6 +80,14 @@ export interface PiecewiseDrainageResult {
   /** Hours that moisture has been continuously above 70% (null if not in Phase 1) */
   hoursAbove70: number | null;
 
+  // ── Phase 2 & 3 Alerts (New) ──
+  /** True if transit time between 70% and 50% exceeds 96 hours (Waterlogged) */
+  phase2Failure: boolean;
+  /** True if Phase 3 capillary loss is exceptionally rapid (high atmospheric demand) */
+  phase3Warning: boolean;
+  /** Transit time between 70% and 50% */
+  transit70to50Hours: number | null;
+
   // ── Backward-compatible mapping ──
   drainClass: "rapid" | "moderate" | "stagnant" | "unknown";
 
@@ -89,6 +97,10 @@ export interface PiecewiseDrainageResult {
   lastWateringAt: string | null;
   peakMoisture: number | null;
   
+  // ── Atmospheric / Light Integration ──
+  vpd_kpa?: number | null;
+  alan_interference?: boolean;
+
   // ── Historical Caching (New) ──
   isHistoricalRate?: boolean;
   historicalDrainClass?: "rapid" | "moderate" | "stagnant" | "unknown";
@@ -191,9 +203,9 @@ function computeVelocities(
   const peakMoisture = event.peakMoisture;
 
   // Track when we cross each boundary
-  let crossedTo50Idx: number | null = null; // First reading ≤ 50% (exiting Phase 1 into Phase 2)
-  let crossedTo70Idx: number | null = null; // First reading ≤ 70% (entering Phase 2)
-  let crossedTo30Idx: number | null = null; // First reading ≤ 30% (entering Phase 3)
+  let crossedTo50Idx: number | null = peakMoisture <= PHASE_2_LOWER ? event.peakIdx : null;
+  let crossedTo70Idx: number | null = peakMoisture <= PHASE_1_BOUNDARY ? event.peakIdx : null;
+  let crossedTo30Idx: number | null = peakMoisture <= PHASE_3_BOUNDARY ? event.peakIdx : null;
 
   // Also track retention (10% drop from peak, for backward compat)
   const retentionThreshold = peakMoisture - 10;
@@ -251,6 +263,16 @@ function computeVelocities(
     }
   }
 
+  // ── Transit 70% to 50% ──
+  let transit70to50Hours: number | null = null;
+  if (crossedTo70Idx !== null) {
+    const t70Ms = toMs(data[crossedTo70Idx].recorded_at);
+    const exitMs = crossedTo50Idx !== null
+      ? toMs(data[crossedTo50Idx].recorded_at)
+      : toMs(data[data.length - 1].recorded_at);
+    transit70to50Hours = hoursElapsed(t70Ms, exitMs);
+  }
+
   // ── Phase 2 duration: time spent between 70% and 30% ──
   if (crossedTo70Idx !== null) {
     const entryMs = toMs(data[crossedTo70Idx].recorded_at);
@@ -280,6 +302,7 @@ function computeVelocities(
     phase1DurationHours: phase1DurationHours !== null ? +phase1DurationHours.toFixed(1) : null,
     phase2DurationHours: phase2DurationHours !== null ? +phase2DurationHours.toFixed(1) : null,
     phase3DurationHours: phase3DurationHours !== null ? +phase3DurationHours.toFixed(1) : null,
+    transit70to50Hours: transit70to50Hours !== null ? +transit70to50Hours.toFixed(1) : null,
     retentionHours,
   };
 }
@@ -373,11 +396,16 @@ export function analyzePiecewiseDrainage(
     currentPhaseSince: null,
     phase1Failure: false,
     hoursAbove70: null,
+    phase2Failure: false,
+    phase3Warning: false,
+    transit70to50Hours: null,
     drainClass: "unknown",
     retentionHours: null,
     wateringEvents: 0,
     lastWateringAt: null,
     peakMoisture: null,
+    vpd_kpa: null,
+    alan_interference: false,
     isHistoricalRate: false,
     historicalDrainClass: "unknown",
   };
@@ -429,6 +457,12 @@ export function analyzePiecewiseDrainage(
     phaseInfo.hoursAbove70 > 24 &&
     (velocities.vGrav === null || velocities.vGrav < 0.5);
 
+  // Phase 2 Failure: transit time between 70% and 50% > 96h
+  const phase2Failure = velocities.transit70to50Hours !== null && velocities.transit70to50Hours > 96;
+
+  // Phase 3 Warning: rapid loss > 0.5%/hr indicates high demand
+  const phase3Warning = velocities.vDry !== null && velocities.vDry > 0.5;
+
   const drainClass = mapDrainClass(velocities.vGrav, velocities.retentionHours);
 
   return {
@@ -441,11 +475,16 @@ export function analyzePiecewiseDrainage(
     currentPhaseSince: phaseInfo.currentPhaseSince,
     phase1Failure,
     hoursAbove70: phaseInfo.hoursAbove70,
+    phase2Failure,
+    phase3Warning,
+    transit70to50Hours: velocities.transit70to50Hours,
     drainClass,
     retentionHours: velocities.retentionHours,
     wateringEvents: eventsInWindow.length,
     lastWateringAt: lastEvent.peakTimestamp,
     peakMoisture: lastEvent.peakMoisture,
+    vpd_kpa: null,
+    alan_interference: false,
     isHistoricalRate,
     historicalDrainClass: drainClass,
   };
