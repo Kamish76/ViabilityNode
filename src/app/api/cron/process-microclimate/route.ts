@@ -163,7 +163,11 @@ async function handleRequest(req: Request) {
         is_historical_rate: piecewise.isHistoricalRate || false,
         last_watered_at: piecewise.lastWateringAt,
         current_phase: piecewise.currentPhase,
-        days_of_data: daysOfData
+        days_of_data: daysOfData,
+        avg_v_grav: piecewise.avgVGrav,
+        avg_v_dry: piecewise.avgVDry,
+        avg_phase2_duration: piecewise.avgPhase2Duration,
+        total_events_analyzed: piecewise.totalEventsAnalyzed,
       };
 
       const { error: upsertError } = await supabaseAdmin

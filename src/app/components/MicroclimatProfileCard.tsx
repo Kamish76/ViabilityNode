@@ -6,9 +6,9 @@ import { useRouter } from "next/navigation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type DLIClass    = "low" | "moderate" | "high" | "unknown";
-export type DrainClass  = "rapid" | "moderate" | "stagnant" | "unknown";
-export type VPDClass    = "low" | "optimal" | "high" | "unknown";
+export type DLIClass = "low" | "moderate" | "high" | "unknown";
+export type DrainClass = "rapid" | "moderate" | "stagnant" | "unknown";
+export type VPDClass = "low" | "optimal" | "high" | "unknown";
 
 export interface PrecalculatedProfile {
   dli_avg: number | null;
@@ -23,72 +23,76 @@ export interface PrecalculatedProfile {
   last_watered_at: string | null;
   current_phase: number | null;
   days_of_data: number;
+  avg_v_grav?: number | null;
+  avg_v_dry?: number | null;
+  avg_phase2_duration?: number | null;
+  total_events_analyzed?: number;
 }
 
 // ─── Plant Lookup Table ───────────────────────────────────────────────────────
 
 interface PlantSuggestion {
-  category:  string;
-  examples:  string[];
-  emoji:     string;
-  vpdNote?:  string;
+  category: string;
+  examples: string[];
+  emoji: string;
+  vpdNote?: string;
 }
 
 const PLANT_LOOKUP: Record<DLIClass, Record<DrainClass, PlantSuggestion>> = {
   low: {
-    rapid:    { category: "Low-light drought-tolerant",  emoji: "🪴", examples: ["Cast iron plant", "ZZ plant", "Haworthia"] },
-    moderate: { category: "Low-light foliage",           emoji: "🌿", examples: ["Pothos", "Philodendron", "Snake plant", "Peace lily"] },
-    stagnant: { category: "Bog & understory shade",      emoji: "🌿", examples: ["Moss", "Maidenhair fern", "Selaginella"] },
-    unknown:  { category: "Low-light general",           emoji: "🌿", examples: ["Pothos", "Snake plant", "ZZ plant"] },
+    rapid: { category: "Low-light drought-tolerant", emoji: "🪴", examples: ["Cast iron plant", "ZZ plant", "Haworthia"] },
+    moderate: { category: "Low-light foliage", emoji: "🌿", examples: ["Pothos", "Philodendron", "Snake plant", "Peace lily"] },
+    stagnant: { category: "Bog & understory shade", emoji: "🌿", examples: ["Moss", "Maidenhair fern", "Selaginella"] },
+    unknown: { category: "Low-light general", emoji: "🌿", examples: ["Pothos", "Snake plant", "ZZ plant"] },
   },
   moderate: {
-    rapid:    { category: "Mediterranean herbs & succulents", emoji: "🌱", examples: ["Rosemary", "Lavender", "Thyme", "Aloe vera"] },
-    moderate: { category: "Common tropical houseplants",      emoji: "🏡", examples: ["Monstera", "Orchid", "Bird of paradise", "Spider plant", "Calathea"] },
-    stagnant: { category: "Moisture-loving tropicals",        emoji: "🌴", examples: ["Ferns", "Calathea", "Peace lily", "Anthurium"] },
-    unknown:  { category: "General houseplants",              emoji: "🏡", examples: ["Monstera", "Pothos", "Fiddle-leaf fig"] },
+    rapid: { category: "Mediterranean herbs & succulents", emoji: "🌱", examples: ["Rosemary", "Lavender", "Thyme", "Aloe vera"] },
+    moderate: { category: "Common tropical houseplants", emoji: "🏡", examples: ["Monstera", "Orchid", "Bird of paradise", "Spider plant", "Calathea"] },
+    stagnant: { category: "Moisture-loving tropicals", emoji: "🌴", examples: ["Ferns", "Calathea", "Peace lily", "Anthurium"] },
+    unknown: { category: "General houseplants", emoji: "🏡", examples: ["Monstera", "Pothos", "Fiddle-leaf fig"] },
   },
   high: {
-    rapid:    { category: "Desert & Mediterranean",  emoji: "🌵", examples: ["Cacti", "Succulents", "Lavender", "Agave", "Fruit trees"] },
-    moderate: { category: "Fruiting crops & herbs",  emoji: "🍅", examples: ["Tomatoes", "Peppers", "Basil", "Citrus (potted)"] },
-    stagnant: { category: "Tropical water-lovers",   emoji: "🌾", examples: ["Taro", "Canna lily", "Elephant ear"] },
-    unknown:  { category: "High-light general",      emoji: "🌵", examples: ["Succulents", "Cacti", "Herbs"] },
+    rapid: { category: "Desert & Mediterranean", emoji: "🌵", examples: ["Cacti", "Succulents", "Lavender", "Agave", "Fruit trees"] },
+    moderate: { category: "Fruiting crops & herbs", emoji: "🍅", examples: ["Tomatoes", "Peppers", "Basil", "Citrus (potted)"] },
+    stagnant: { category: "Tropical water-lovers", emoji: "🌾", examples: ["Taro", "Canna lily", "Elephant ear"] },
+    unknown: { category: "High-light general", emoji: "🌵", examples: ["Succulents", "Cacti", "Herbs"] },
   },
   unknown: {
-    rapid:    { category: "Drought-tolerant",  emoji: "🌵", examples: ["Succulents", "Cacti", "ZZ plant"] },
+    rapid: { category: "Drought-tolerant", emoji: "🌵", examples: ["Succulents", "Cacti", "ZZ plant"] },
     moderate: { category: "General houseplants", emoji: "🏡", examples: ["Pothos", "Monstera", "Snake plant"] },
-    stagnant: { category: "Moisture-lovers",    emoji: "🌿", examples: ["Ferns", "Calathea", "Peace lily"] },
-    unknown:  { category: "Awaiting profile",   emoji: "🌱", examples: ["Accumulating data…"] },
+    stagnant: { category: "Moisture-lovers", emoji: "🌿", examples: ["Ferns", "Calathea", "Peace lily"] },
+    unknown: { category: "Awaiting profile", emoji: "🌱", examples: ["Accumulating data…"] },
   },
 };
 
 const VPD_MODIFIER: Record<VPDClass, { note: string; color: string; icon: typeof AlertTriangle } | null> = {
-  low:     { note: "⚠ Chronically low VPD — high fungal & mildew risk. Prioritise plants with strong disease resistance.", color: "#a855f7", icon: AlertTriangle },
+  low: { note: "⚠ Chronically low VPD — high fungal & mildew risk. Prioritise plants with strong disease resistance.", color: "#a855f7", icon: AlertTriangle },
   optimal: null,
-  high:    { note: "⚠ Chronically high VPD — atmospheric drought stress. Choose plants with tough, waxy, or succulent leaves.", color: "#ef4444", icon: AlertTriangle },
+  high: { note: "⚠ Chronically high VPD — atmospheric drought stress. Choose plants with tough, waxy, or succulent leaves.", color: "#ef4444", icon: AlertTriangle },
   unknown: null,
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 const DLI_META: Record<DLIClass, { label: string; color: string; bg: string; border: string }> = {
-  low:      { label: "Low · Shade",     color: "#60a5fa", bg: "#1e3a5f33", border: "#3b82f640" },
-  moderate: { label: "Moderate",        color: "#34d399", bg: "#06402033", border: "#10b98140" },
-  high:     { label: "High · Intense",  color: "#fbbf24", bg: "#45230033", border: "#f59e0b40" },
-  unknown:  { label: "Awaiting data",   color: "#71717a", bg: "#27272a33", border: "#3f3f4640" },
+  low: { label: "Low · Shade", color: "#60a5fa", bg: "#1e3a5f33", border: "#3b82f640" },
+  moderate: { label: "Moderate", color: "#34d399", bg: "#06402033", border: "#10b98140" },
+  high: { label: "High · Intense", color: "#fbbf24", bg: "#45230033", border: "#f59e0b40" },
+  unknown: { label: "Awaiting data", color: "#71717a", bg: "#27272a33", border: "#3f3f4640" },
 };
 
 const DRAIN_META: Record<DrainClass, { label: string; color: string; bg: string; border: string }> = {
-  rapid:     { label: "Rapid",              color: "#34d399", bg: "#06402033", border: "#10b98140" },
-  moderate:  { label: "Moderate",           color: "#fbbf24", bg: "#45230033", border: "#f59e0b40" },
-  stagnant:  { label: "Stagnant/Hypoxic",   color: "#f87171", bg: "#450a0a33", border: "#ef444440" },
-  unknown:   { label: "Pending watering",  color: "#71717a", bg: "#27272a33", border: "#3f3f4640" },
+  rapid: { label: "Rapid", color: "#34d399", bg: "#06402033", border: "#10b98140" },
+  moderate: { label: "Moderate", color: "#fbbf24", bg: "#45230033", border: "#f59e0b40" },
+  stagnant: { label: "Stagnant/Hypoxic", color: "#f87171", bg: "#450a0a33", border: "#ef444440" },
+  unknown: { label: "Pending watering", color: "#71717a", bg: "#27272a33", border: "#3f3f4640" },
 };
 
 const VPD_META: Record<VPDClass, { label: string; color: string; bg: string; border: string }> = {
-  low:      { label: "Low · Fungal risk",  color: "#c084fc", bg: "#3b0764 33", border: "#a855f740" },
-  optimal:  { label: "Optimal",            color: "#2dd4bf", bg: "#083344 33", border: "#14b8a640" },
-  high:     { label: "High · Drought",     color: "#f87171", bg: "#450a0a33", border: "#ef444440" },
-  unknown:  { label: "Awaiting data",      color: "#71717a", bg: "#27272a33", border: "#3f3f4640" },
+  low: { label: "Low · Fungal risk", color: "#c084fc", bg: "#3b0764 33", border: "#a855f740" },
+  optimal: { label: "Optimal", color: "#2dd4bf", bg: "#083344 33", border: "#14b8a640" },
+  high: { label: "High · Drought", color: "#f87171", bg: "#450a0a33", border: "#ef444440" },
+  unknown: { label: "Awaiting data", color: "#71717a", bg: "#27272a33", border: "#3f3f4640" },
 };
 
 function ClassBadge({ label, color, bg, border }: { label: string; color: string; bg: string; border: string }) {
@@ -129,6 +133,32 @@ function MetricRow({
           {value} <span className="text-xs font-normal text-zinc-400">{unit}</span>
         </p>
         <ClassBadge {...meta} />
+      </div>
+    </div>
+  );
+}
+
+function PhaseMetric({
+  label,
+  valueStr,
+  unit,
+  statusColor,
+}: {
+  label: string;
+  valueStr: string;
+  unit: string;
+  statusColor: string; // Tailwind class e.g., 'text-emerald-400'
+}) {
+  return (
+    <div className="flex flex-col gap-1 p-2.5 rounded-xl bg-zinc-900/50 border border-zinc-800/60">
+      <span className="text-[10px] uppercase font-semibold tracking-wider text-zinc-500">
+        {label}
+      </span>
+      <div className="flex items-baseline gap-1">
+        <span className={`text-sm font-bold tabular-nums ${statusColor}`}>
+          {valueStr}
+        </span>
+        <span className="text-[10px] text-zinc-500 font-medium">{unit}</span>
       </div>
     </div>
   );
@@ -236,7 +266,7 @@ export function MicroclimatProfileCard({
             )}
             <p className="text-xs text-zinc-600 mt-0.5">{profile.days_of_data} / 30 days</p>
           </div>
-          
+
           <button
             onClick={handleRecalculate}
             disabled={!deviceId || isRecalculating}
@@ -283,58 +313,80 @@ export function MicroclimatProfileCard({
           unit="mol/m²/day"
           meta={DLI_META[profile.dli_class]}
         />
-        <MetricRow
-          icon={<Droplets className="w-4 h-4 text-emerald-400" />}
-          title="Water Retention"
-          subtitle={(() => {
-            let base = "Time to lose 10% from peak after watering";
-            if (profile.drain_class === 'unknown') {
-              return "Drainage pending next watering cycle";
-            }
-            if (profile.is_historical_rate && profile.last_watered_at) {
-              const dateStr = new Date(profile.last_watered_at).toLocaleDateString([], { month: 'short', day: 'numeric' });
-              base = `Historical Rate (Last watered ${dateStr})`;
-            } else if (isPot) {
-              base = "Pot drainage — fast is expected, slow = check drainage holes";
-            }
-            if (profile.current_phase === 3) {
-              base += " — Capillary Plateau / Dry";
-            }
-            
-            const parts: React.ReactNode[] = [];
-            if (profile.v_grav !== null) parts.push(<span key="v_grav">V<sub>grav</sub>: {profile.v_grav.toFixed(2)} %/hr</span>);
-            if (profile.v_dry !== null) parts.push(<span key="v_dry">V<sub>dry</sub>: {profile.v_dry.toFixed(2)} %/hr</span>);
 
-            if (parts.length === 0) return base;
+        {/* ── 30-Day Drainage Profile ── */}
+        <div className="flex items-start gap-4 py-4 border-b border-zinc-800/60 last:border-0">
+          <div className="shrink-0 p-2.5 rounded-xl bg-zinc-800/60">
+            <Droplets className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex justify-between items-start mb-2">
+              <div>
+                <p className="text-sm font-medium text-white">Drainage Profile</p>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  {(profile.total_events_analyzed ?? 0) >= 2
+                    ? `30-day average across ${profile.total_events_analyzed} watering cycles`
+                    : `Accumulating profile data... (${profile.total_events_analyzed ?? 0} cycles)`}
+                </p>
+              </div>
+              <div className="shrink-0 text-right space-y-1.5">
+                <ClassBadge {...DRAIN_META[profile.drain_class]} />
+              </div>
+            </div>
 
-            return (
-              <span className="flex items-center gap-1.5 flex-wrap">
-                <span>{base}</span>
-                {parts.map((part, i) => (
-                  <span key={i} className="flex items-center gap-1.5">
-                    <span className="text-zinc-600">·</span>
-                    {part}
-                  </span>
-                ))}
-              </span>
-            );
-          })()}
-          value={(() => {
-            if (profile.retention_hours === null) return "—";
-            if (profile.retention_hours < 1) return `${Math.round(profile.retention_hours * 60)}`;
-            if (profile.retention_hours < 24) return profile.retention_hours.toFixed(1);
-            const days = Math.floor(profile.retention_hours / 24);
-            const hrs = Math.round(profile.retention_hours % 24);
-            return `${days}d ${hrs}h`;
-          })()}
-          unit={(() => {
-            if (profile.retention_hours === null) return "";
-            if (profile.retention_hours < 1) return "min";
-            if (profile.retention_hours < 24) return "hours";
-            return ""; // The d/h units are inside the value string
-          })()}
-          meta={DRAIN_META[profile.drain_class]}
-        />
+            {((profile.total_events_analyzed ?? 0) >= 2) ? (
+              <div className="grid grid-cols-3 gap-2 mt-3">
+                <PhaseMetric
+                  label="Phase 1 (Grav.)"
+                  valueStr={profile.avg_v_grav !== null && profile.avg_v_grav !== undefined ? profile.avg_v_grav.toFixed(2) : "—"}
+                  unit="%/hr"
+                  statusColor={
+                    (profile.avg_v_grav ?? 0) > 3.0 ? "text-emerald-400" :
+                      (profile.avg_v_grav ?? 0) >= 0.8 ? "text-amber-400" : "text-red-400"
+                  }
+                />
+                <PhaseMetric
+                  label="Phase 2 (Transit)"
+                  valueStr={profile.avg_phase2_duration !== null && profile.avg_phase2_duration !== undefined ? profile.avg_phase2_duration.toFixed(1) : "—"}
+                  unit="hrs"
+                  statusColor="text-blue-400"
+                />
+                <PhaseMetric
+                  label="Phase 3 (Cap. ET)"
+                  valueStr={profile.avg_v_dry !== null && profile.avg_v_dry !== undefined ? profile.avg_v_dry.toFixed(2) : "—"}
+                  unit="%/hr"
+                  statusColor={
+                    (profile.avg_v_dry ?? 0) > 0.5 ? "text-emerald-400" :
+                      (profile.avg_v_dry ?? 0) >= 0.1 ? "text-amber-400" : "text-red-400"
+                  }
+                />
+              </div>
+            ) : (
+              <div className="mt-3 p-3 rounded-xl bg-zinc-900/50 border border-zinc-800/60 flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-zinc-400">Current / Last Event</p>
+                  <p className="text-[10px] text-zinc-500">
+                    V<sub>grav</sub>: {profile.v_grav !== null ? profile.v_grav.toFixed(2) : "—"} %/hr · V<sub>dry</sub>: {profile.v_dry !== null ? profile.v_dry.toFixed(2) : "—"} %/hr
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-white tabular-nums">
+                    {(() => {
+                      if (profile.retention_hours === null) return "—";
+                      if (profile.retention_hours < 1) return `${Math.round(profile.retention_hours * 60)} min`;
+                      if (profile.retention_hours < 24) return `${profile.retention_hours.toFixed(1)} hrs`;
+                      const days = Math.floor(profile.retention_hours / 24);
+                      const hrs = Math.round(profile.retention_hours % 24);
+                      return `${days}d ${hrs}h`;
+                    })()}
+                  </p>
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Retention</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
         <MetricRow
           icon={<Wind className="w-4 h-4 text-teal-400" />}
           title="VPD · Transpiration"

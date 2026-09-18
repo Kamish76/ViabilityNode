@@ -102,6 +102,12 @@ export interface PiecewiseDrainageResult {
   cachedVGrav?: number | null;
   cachedVDry?: number | null;
   cachedDrainClass?: "rapid" | "moderate" | "stagnant" | "unknown";
+
+  // ── 30-Day Aggregates (New) ──
+  avgVGrav: number | null;
+  avgVDry: number | null;
+  avgPhase2Duration: number | null;
+  totalEventsAnalyzed: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -148,112 +154,89 @@ function computeVelocities(
   phase3DurationHours: number | null;
   retentionHours: number | null;
   transit70to50Hours: number | null;
+  phase2Completed: boolean;
 } {
   const peakTimeMs = toMs(data[event.peakIdx].recorded_at);
   const peakMoisture = event.peakMoisture;
   const endLimitIdx = nextEventSpikeIdx !== undefined ? nextEventSpikeIdx : (data.length - 1);
 
-  // Track when we cross each boundary
-  let crossedTo50Idx: number | null = peakMoisture <= PHASE_2_LOWER ? event.peakIdx : null;
   let crossedTo70Idx: number | null = peakMoisture <= PHASE_1_BOUNDARY ? event.peakIdx : null;
+  let crossedTo50Idx: number | null = peakMoisture <= PHASE_2_LOWER ? event.peakIdx : null;
   let crossedTo30Idx: number | null = peakMoisture <= PHASE_3_BOUNDARY ? event.peakIdx : null;
 
-  // Also track retention (10% drop from peak, for backward compat)
   const retentionThreshold = peakMoisture - 10;
   let retentionCrossIdx: number | null = null;
 
   for (let j = event.peakIdx + 1; j <= endLimitIdx; j++) {
     const m = data[j].moisture_pct;
-
-    if (crossedTo70Idx === null && m <= PHASE_1_BOUNDARY) {
-      crossedTo70Idx = j;
-    }
-    if (crossedTo50Idx === null && m <= PHASE_2_LOWER) {
-      crossedTo50Idx = j;
-    }
-    if (crossedTo30Idx === null && m <= PHASE_3_BOUNDARY) {
-      crossedTo30Idx = j;
-    }
-    if (retentionCrossIdx === null && m <= retentionThreshold) {
-      retentionCrossIdx = j;
-    }
+    if (crossedTo70Idx === null && m <= PHASE_1_BOUNDARY) crossedTo70Idx = j;
+    if (crossedTo50Idx === null && m <= PHASE_2_LOWER) crossedTo50Idx = j;
+    if (crossedTo30Idx === null && m <= PHASE_3_BOUNDARY) crossedTo30Idx = j;
+    if (retentionCrossIdx === null && m <= retentionThreshold) retentionCrossIdx = j;
   }
 
-  // ── V_grav: peak → 50% ──
+  // ── Phase 1 ($V_{grav}$): Peak → 70% ──
   let vGrav: number | null = null;
   let phase1DurationHours: number | null = null;
 
-  if (peakMoisture > PHASE_1_BOUNDARY && crossedTo50Idx !== null) {
-    const t50Ms = toMs(data[crossedTo50Idx].recorded_at);
-    const hours = hoursElapsed(peakTimeMs, t50Ms);
-    if (hours > 0) {
-      vGrav = (peakMoisture - PHASE_2_LOWER) / hours;
-      phase1DurationHours = hours;
-    }
-  } else if (peakMoisture <= PHASE_1_BOUNDARY && peakMoisture > PHASE_2_LOWER && crossedTo50Idx !== null) {
-    // Peak was in Phase 2 range but above 50%. Still compute a partial rate.
-    const t50Ms = toMs(data[crossedTo50Idx].recorded_at);
-    const hours = hoursElapsed(peakTimeMs, t50Ms);
-    if (hours > 0) {
-      vGrav = (peakMoisture - PHASE_2_LOWER) / hours;
-      phase1DurationHours = hours;
+  if (peakMoisture > PHASE_1_BOUNDARY && crossedTo70Idx !== null) {
+    const t70Ms = toMs(data[crossedTo70Idx].recorded_at);
+    const hours = hoursElapsed(peakTimeMs, t70Ms);
+    const safeHours = Math.max(hours, 0.5); // Prevent astronomical numbers for near-instant drops
+    vGrav = (peakMoisture - PHASE_1_BOUNDARY) / safeHours;
+    phase1DurationHours = hours;
+  }
+
+  // ── Phase 2 (Transit): 70% → 30% ──
+  let phase2DurationHours: number | null = null;
+  if (crossedTo70Idx !== null || peakMoisture <= PHASE_1_BOUNDARY) {
+    const entryMs = crossedTo70Idx !== null ? toMs(data[crossedTo70Idx].recorded_at) : peakTimeMs;
+    if (crossedTo30Idx !== null) {
+       const exitMs = toMs(data[crossedTo30Idx].recorded_at);
+       phase2DurationHours = hoursElapsed(entryMs, exitMs);
     }
   }
 
-  // ── V_dry: 50% (or peak) → 30% (or end of event) ──
+  // Transit 70% to 50% (kept for alerts)
+  let transit70to50Hours: number | null = null;
+  if (crossedTo70Idx !== null && crossedTo50Idx !== null) {
+    const t70Ms = toMs(data[crossedTo70Idx].recorded_at);
+    const t50Ms = toMs(data[crossedTo50Idx].recorded_at);
+    transit70to50Hours = hoursElapsed(t70Ms, t50Ms);
+  }
+
+  // ── Phase 3 ($V_{dry}$): 30% → minimum ──
   let vDry: number | null = null;
-  let phase2DurationHours: number | null = null;
   let phase3DurationHours: number | null = null;
 
-  if (peakMoisture > PHASE_2_LOWER) {
-    if (crossedTo50Idx !== null && crossedTo30Idx !== null) {
-      const t50Ms = toMs(data[crossedTo50Idx].recorded_at);
-      const t30Ms = toMs(data[crossedTo30Idx].recorded_at);
-      const hours = hoursElapsed(t50Ms, t30Ms);
-      if (hours > 0) {
-        vDry = (PHASE_2_LOWER - PHASE_3_BOUNDARY) / hours;
-      }
-    }
-  } else {
-    // Peak is in Phase 3 or borderline. Measure ET rate across the whole available window for stability.
-    const startMs = peakTimeMs;
-    const startMoisture = peakMoisture;
-    const endMoisture = data[endLimitIdx].moisture_pct;
-    
-    // Only calculate if we've dropped a bit or enough time has passed to establish a stable rate
-    const hours = hoursElapsed(startMs, toMs(data[endLimitIdx].recorded_at));
-    if (hours >= 2 && (startMoisture - endMoisture) >= 0) {
-      vDry = (startMoisture - endMoisture) / hours;
-    }
-  }
-
-  // ── Transit 70% to 50% ──
-  let transit70to50Hours: number | null = null;
-  if (crossedTo70Idx !== null) {
-    const t70Ms = toMs(data[crossedTo70Idx].recorded_at);
-    const exitMs = crossedTo50Idx !== null
-      ? toMs(data[crossedTo50Idx].recorded_at)
-      : toMs(data[endLimitIdx].recorded_at);
-    transit70to50Hours = hoursElapsed(t70Ms, exitMs);
-  }
-
-  // ── Phase 2 duration: time spent between 70% and 30% ──
-  if (crossedTo70Idx !== null) {
-    const entryMs = toMs(data[crossedTo70Idx].recorded_at);
-    const exitMs = crossedTo30Idx !== null
-      ? toMs(data[crossedTo30Idx].recorded_at)
-      : toMs(data[endLimitIdx].recorded_at); // Still in Phase 2
-    phase2DurationHours = hoursElapsed(entryMs, exitMs);
-  }
-
-  // ── Phase 3 duration: time spent below 30% ──
   if (crossedTo30Idx !== null) {
-    const entryMs = toMs(data[crossedTo30Idx].recorded_at);
+    const t30Ms = toMs(data[crossedTo30Idx].recorded_at);
     const latestMs = toMs(data[endLimitIdx].recorded_at);
-    phase3DurationHours = hoursElapsed(entryMs, latestMs);
+    const hours = hoursElapsed(t30Ms, latestMs);
+    phase3DurationHours = hours;
+    
+    // Find minimum moisture reached in Phase 3
+    let minMoisture = data[crossedTo30Idx].moisture_pct;
+    for (let i = crossedTo30Idx + 1; i <= endLimitIdx; i++) {
+        if (data[i].moisture_pct < minMoisture) {
+            minMoisture = data[i].moisture_pct;
+        }
+    }
+    
+    // Need at least 1 hour of Phase 3 data for stable ET rate
+    if (hours >= 1) { 
+       vDry = (PHASE_3_BOUNDARY - minMoisture) / hours;
+    }
+  } else if (peakMoisture <= PHASE_3_BOUNDARY) {
+      const hours = hoursElapsed(peakTimeMs, toMs(data[endLimitIdx].recorded_at));
+      phase3DurationHours = hours;
+      const endMoisture = data[endLimitIdx].moisture_pct;
+      if (hours >= 1 && peakMoisture - endMoisture >= 0) {
+          vDry = (peakMoisture - endMoisture) / hours;
+      }
   }
 
-  // ── Retention (backward compat) ──
+  // ── Retention ──
   let retentionHours: number | null = null;
   if (retentionCrossIdx !== null) {
     const dropTimeMs = toMs(data[retentionCrossIdx].recorded_at);
@@ -268,6 +251,7 @@ function computeVelocities(
     phase3DurationHours: phase3DurationHours !== null ? +phase3DurationHours.toFixed(1) : null,
     transit70to50Hours: transit70to50Hours !== null ? +transit70to50Hours.toFixed(1) : null,
     retentionHours,
+    phase2Completed: crossedTo30Idx !== null,
   };
 }
 
@@ -316,37 +300,29 @@ function analyzeCurrentPhase(data: MoistureReading[]): {
  * Phase-dependent evaluation: Phase 1 & 2 evaluated on macropores/gravity, Phase 3 evaluated on Capillary ET.
  */
 function mapDrainClass(
-  vGrav: number | null,
-  retentionHours: number | null,
-  vDry: number | null,
-  peakMoisture: number | null
+  avgVGrav: number | null,
+  avgVDry: number | null,
+  avgPhase2Duration: number | null
 ): "rapid" | "moderate" | "stagnant" | "unknown" {
-  if (peakMoisture === null) return "unknown";
-
-  // Phase 1 / Phase 2 (Peak > 50%) -> Judged by V_grav or retention time
-  if (peakMoisture >= PHASE_2_LOWER) {
-    // V_grav is the strongest signal
-    if (vGrav !== null) {
-      if (vGrav > 3.0) return "rapid";      // Drains Phase 1 very quickly
-      if (vGrav > 0.8) return "moderate";    // Reasonable clearance
-      return "stagnant";                     // Slow or no clearance
-    }
-
-    // Fallback to retention time (existing logic)
-    if (retentionHours !== null) {
-      if (retentionHours < 6) return "rapid";
-      if (retentionHours <= 48) return "moderate";
-      return "stagnant";
-    }
-
-    return "unknown";
+  // Phase 1 (Gravitational) evaluates macropores. This is the primary indicator of soil structure health.
+  if (avgVGrav !== null) {
+    if (avgVGrav > 3.0) return "rapid";
+    if (avgVGrav >= 0.8) return "moderate";
+    return "stagnant";
   }
 
-  // Phase 3 (Peak < 50%) -> Judged purely by capillary ET drying rate (vDry)
-  if (vDry !== null) {
-    if (vDry > 0.5) return "rapid";      // Active ET
-    if (vDry >= 0.1) return "moderate";  // Normal Dry
-    return "stagnant";                   // Very slow (high humidity / shade)
+  // If no Phase 1 happened (never reached >70%), evaluate Phase 3 ET rate
+  if (avgVDry !== null) {
+    if (avgVDry > 0.5) return "rapid";
+    if (avgVDry >= 0.1) return "moderate";
+    return "stagnant";
+  }
+
+  // Fallback to Phase 2 Transit Time
+  if (avgPhase2Duration !== null) {
+    if (avgPhase2Duration < 24) return "rapid";
+    if (avgPhase2Duration <= 72) return "moderate";
+    return "stagnant";
   }
 
   return "unknown";
@@ -388,6 +364,10 @@ export function analyzePiecewiseDrainage(
     cachedVGrav: null,
     cachedVDry: null,
     cachedDrainClass: "unknown",
+    avgVGrav: null,
+    avgVDry: null,
+    avgPhase2Duration: null,
+    totalEventsAnalyzed: 0,
   };
 
   if (data.length < 6) return defaultResult;
@@ -422,21 +402,59 @@ export function analyzePiecewiseDrainage(
     };
   }
 
-  // 1. Calculate CURRENT event velocities
+  // 1. Calculate 30-day averages across all detected events first
+  let totalVGrav = 0, countVGrav = 0;
+  let totalVDry = 0, countVDry = 0;
+  let totalPhase2 = 0, countPhase2 = 0;
+  let totalEventsAnalyzed = 0;
+
+  for (let i = 0; i < allEvents.length; i++) {
+    const nextSpikeIdx = i < allEvents.length - 1 ? allEvents[i + 1].spikeIdx : undefined;
+    const vels = computeVelocities(filtered, allEvents[i], nextSpikeIdx);
+    
+    let counted = false;
+    if (vels.vGrav !== null) {
+      totalVGrav += vels.vGrav;
+      countVGrav++;
+      counted = true;
+    }
+    if (vels.vDry !== null) {
+      totalVDry += vels.vDry;
+      countVDry++;
+      counted = true;
+    }
+    if (vels.phase2DurationHours !== null && vels.phase2Completed) {
+      totalPhase2 += vels.phase2DurationHours;
+      countPhase2++;
+      counted = true;
+    }
+    if (counted) totalEventsAnalyzed++;
+  }
+
+  const avgVGrav = countVGrav > 0 ? +(totalVGrav / countVGrav).toFixed(3) : null;
+  const avgVDry = countVDry > 0 ? +(totalVDry / countVDry).toFixed(3) : null;
+  const avgPhase2Duration = countPhase2 > 0 ? +(totalPhase2 / countPhase2).toFixed(1) : null;
+
+  // 2. Classify the overall drainage health based on 30-day averages
+  const overallDrainClass = mapDrainClass(avgVGrav, avgVDry, avgPhase2Duration);
+
+  // 3. Current Event Fallback (for < 2 events)
   const currentEvent = allEvents[allEvents.length - 1];
   const currentVelocities = computeVelocities(filtered, currentEvent);
-  const currentDrainClass = mapDrainClass(currentVelocities.vGrav, currentVelocities.retentionHours, currentVelocities.vDry, currentEvent.peakMoisture);
+  const currentDrainClass = mapDrainClass(currentVelocities.vGrav, currentVelocities.vDry, currentVelocities.phase2DurationHours);
+  
+  const finalDrainClass = totalEventsAnalyzed >= 2 ? overallDrainClass : currentDrainClass;
 
-  // 2. Determine HISTORICAL cached values (if current is unknown)
+  // Determine HISTORICAL cached values (if current is unknown)
   let bestVelocities = currentVelocities;
-  let bestDrainClass = currentDrainClass;
+  let bestDrainClass = finalDrainClass;
   let bestEvent = currentEvent;
 
-  if (currentDrainClass === "unknown" && allEvents.length > 1) {
+  if (finalDrainClass === "unknown" && allEvents.length > 1) {
     for (let i = allEvents.length - 2; i >= 0; i--) {
       const nextSpikeIdx = allEvents[i + 1].spikeIdx;
       const hVels = computeVelocities(filtered, allEvents[i], nextSpikeIdx);
-      const hClass = mapDrainClass(hVels.vGrav, hVels.retentionHours, hVels.vDry, allEvents[i].peakMoisture);
+      const hClass = mapDrainClass(hVels.vGrav, hVels.vDry, hVels.phase2DurationHours);
       if (hClass !== "unknown") {
         bestVelocities = hVels;
         bestDrainClass = hClass;
@@ -445,10 +463,10 @@ export function analyzePiecewiseDrainage(
       }
     }
   }
-  
+
   const isHistoricalRate = toMs(bestEvent.peakTimestamp) < cutoff || bestEvent !== currentEvent;
 
-  // 3. Phase 1 Failure detection (Report Section 5, Trigger 1):
+  // 4. Phase 1 Failure detection (Report Section 5, Trigger 1):
   // Moisture stays >70% for extended period without adequate V_grav (Uses CURRENT velocities)
   const phase1Failure =
     phaseInfo.currentPhase === 1 &&
@@ -475,7 +493,7 @@ export function analyzePiecewiseDrainage(
     phase2Failure,
     phase3Warning,
     transit70to50Hours: currentVelocities.transit70to50Hours,
-    drainClass: currentDrainClass,
+    drainClass: finalDrainClass,
     retentionHours: currentVelocities.retentionHours,
     wateringEvents: eventsInWindow.length,
     lastWateringAt: currentEvent.peakTimestamp,
@@ -487,5 +505,9 @@ export function analyzePiecewiseDrainage(
     cachedVGrav: bestVelocities.vGrav,
     cachedVDry: bestVelocities.vDry,
     cachedDrainClass: bestDrainClass,
+    avgVGrav,
+    avgVDry,
+    avgPhase2Duration,
+    totalEventsAnalyzed,
   };
 }

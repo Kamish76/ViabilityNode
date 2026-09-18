@@ -2,11 +2,12 @@
 
 The `MicroclimatProfileCard` is a vital diagnostic component of the ViabilityNode ecosystem. It translates raw, time-series capacitive soil moisture telemetry into an actionable, biophysical understanding of a specific substrate's water clearance characteristics.
 
-## Core Philosophy: Phase-Dependent Drainage
-Water movement in soil is not uniform; it is governed by shifting physical forces that dominate at specific moisture thresholds. Rather than using a simple linear average to determine how fast soil drains, the system segments drainage into a **Three-Phase Biophysical Model**.
+## Core Philosophy: 30-Day Phase-Dependent Aggregate Drainage
+
+Water movement in soil is not uniform; it is governed by shifting physical forces that dominate at specific moisture thresholds. Rather than using a simple linear average across all data, or relying solely on the most recent watering event, the system uses a **30-Day Aggregate Three-Phase Biophysical Model**.
 
 > [!NOTE]
-> The drainage classification (Rapid, Moderate, Stagnant) of a soil is explicitly tied to the **peak phase** reached during a watering event. A torrential downpour behaves physically differently than a light misting, and the system judges them accordingly.
+> The drainage classification (Rapid, Moderate, Stagnant) of a soil is explicitly tied to the **30-day averages** across all detected watering cycles. This creates a true, resilient "fingerprint" of the soil structure's health, rather than being skewed by a single anomalous watering event.
 
 ---
 
@@ -14,8 +15,9 @@ Water movement in soil is not uniform; it is governed by shifting physical force
 **Dominant Force:** Gravity / Macropore Clearance
 **Velocity Metric:** $V_{grav}$ (%/hr)
 
-When soil is heavily saturated (e.g., from a deep watering), water fills the large macropores, displacing essential oxygen. The primary driver of moisture loss here is simple gravity pulling water downward.
-- **Evaluation Criteria:**
+When soil is heavily saturated (e.g., from a deep watering), water fills the large macropores, displacing essential oxygen. The primary driver of moisture loss here is simple gravity pulling water downward. Phase 1 strictly measures the time it takes for moisture to drop from its peak down to the 70% boundary.
+
+- **Evaluation Criteria (30-Day Average):**
   - **Rapid:** $> 3.0$ %/hr
   - **Moderate:** $0.8$ – $3.0$ %/hr
   - **Stagnant:** $< 0.8$ %/hr
@@ -25,12 +27,11 @@ When soil is heavily saturated (e.g., from a deep watering), water fills the lar
 
 ---
 
-## 2. Phase 2: Field Capacity Transition (30%–70% Moisture)
+## 2. Phase 2: Field Capacity Transit (70%–30% Moisture)
 **Dominant Force:** Matric Potential (Capillary Action)
-**Velocity Metric:** $V_{grav}$ (partial) / Retention Time
+**Velocity Metric:** Transit Time (Hours)
 
-This is the "Available Water Capacity" zone where water is held by surface tension. Gravity ceases to be the dominant force as moisture levels drop, and the soil begins to stabilize toward its field capacity.
-- **Evaluation Criteria:** Evaluated similarly to Phase 1 (via partial $V_{grav}$ or time to drop 10%).
+This is the "Available Water Capacity" zone where water is held by surface tension. Gravity ceases to be the dominant force, and the soil stabilizes toward its field capacity. Phase 2 strictly evaluates the total time spent transiting from the 70% boundary down to the 30% boundary.
 
 ---
 
@@ -38,27 +39,24 @@ This is the "Available Water Capacity" zone where water is held by surface tensi
 **Dominant Force:** Capillary Tension + ET (Evapotranspiration)
 **Velocity Metric:** $V_{dry}$ (%/hr)
 
-Below 30% moisture, the substrate enters the Capillary plateau. Gravity has no effect here. Moisture is lost exclusively through atmospheric demand (VPD - Vapor Pressure Deficit) drawing moisture from the soil surface, or via active root uptake by the plant.
+Below 30% moisture, the substrate enters the Capillary plateau. Gravity has no effect. Moisture is lost exclusively through atmospheric demand (VPD - Vapor Pressure Deficit) drawing moisture from the soil surface, or via active root uptake by the plant. Phase 3 evaluates drainage from 30% down to the minimum moisture reached before the next event.
 
-- **Evaluation Criteria (For events peaking in Phase 3):**
-  - **Rapid:** $> 0.5$ %/hr (Indicates high atmospheric demand or vigorous active ET)
-  - **Moderate:** $\ge 0.1$ %/hr (Normal baseline capillary drying)
+- **Evaluation Criteria (30-Day Average):**
+  - **Active ET (Rapid):** $> 0.5$ %/hr (Indicates high atmospheric demand or vigorous active ET)
+  - **Normal Dry (Moderate):** $0.1$ – $0.5$ %/hr (Normal baseline capillary drying)
   - **Stagnant:** $< 0.1$ %/hr (Very slow drying; usually indicates high humidity, dense shade, or dormant roots)
-
-> [!TIP]
-> By evaluating Phase 3 independently via $V_{dry}$, light showers or mists aren't unfairly classified as "stagnant" just because Capillary/ET drying is inherently slower than Gravitational clearance.
 
 ---
 
-## Edge Cases & Hardware Integration
+## Edge Cases & Architectural Robustness
 
-### The "Light Shower" Scenario
-If a user lightly waters a plant, causing a moisture spike from 22% to 32%, the system recognizes this as a valid watering event. However, because it peaked in Phase 3, it never triggered gravitational drainage.
-**Handling:** The system intelligently uses $V_{dry}$ to classify the event. If $V_{dry}$ is >0.1%/hr, it is classified as "Moderate" (normal for Phase 3), preventing a false-negative "Stagnant" classification.
+### The "Astronomical Drop" (Divide-by-Zero Prevention)
+In cases of extremely loose, fast-draining substrate (like chunky orchid bark), watering can cause a near-instantaneous moisture drop (e.g., passing through Phase 1 in mere minutes). Mathematically, this produces astronomical velocities (e.g., 2000+ %/hr).
+**Handling:** The algorithm enforces a hard `0.5 hour` minimum on the time delta used for the denominator when calculating velocities. This safely caps the maximum possible $V_{grav}$ at a sensible ~60 %/hr, maintaining a "Rapid" classification without breaking the UI readability.
 
-### The "Pending Watering" (Unknown) State
-If a watering event has just occurred and hasn't yet dropped enough to calculate a reliable velocity (e.g., currently absorbing), or if the sensor is brand new with no deep historical watering events, the drainage class defaults to `unknown`. 
-**Historical Caching Fallback:** To maintain UI stability and continuous microclimate profiling, if the *current* event is "Pending", the backend engine will automatically iterate backward through the last 30 days of telemetry to find the most recent *completed* watering event and use its known drainage profile instead.
+### The "Insufficient Data" Fallback
+The UI is designed to present the 30-day averages in a detailed 3-column `Drainage Profile` grid.
+**Handling:** If there are fewer than 2 completed watering events in the 30-day window, the system falls back to a compact display showing the raw velocities and retention of the *current (or most recent)* single event, marked clearly with an "Accumulating profile data..." notice.
 
 ### Hardware Calibration Limits
 To prevent UI glitches or negative percentages, the system applies hardcoded limits to raw ADC values from the Capacitive Soil Moisture Sensor v1.2:
