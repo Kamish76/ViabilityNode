@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Leaf, Droplets, Sun, Wind, Clock, AlertTriangle, CheckCircle2, TrendingUp, RefreshCw } from "lucide-react";
+import { Leaf, Droplets, Sun, Wind, Clock, AlertTriangle, CheckCircle2, TrendingUp, RefreshCw, Info, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -183,6 +183,7 @@ export function MicroclimatProfileCard({
 }) {
   const [timeWindow, setTimeWindow] = useState<"7d" | "30d">("30d");
   const [isRecalculating, setIsRecalculating] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const router = useRouter();
   const isPot = placementType === "pot";
 
@@ -242,14 +243,23 @@ export function MicroclimatProfileCard({
             <Leaf className="w-5 h-5 text-emerald-400" />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-white">
-              Microclimate Profile
-              {isPot && (
-                <span className="ml-2 text-xs font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full align-middle">
-                  🪴 Pot context
-                </span>
-              )}
-            </h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-semibold text-white">
+                Microclimate Profile
+                {isPot && (
+                  <span className="ml-2 text-xs font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full align-middle">
+                    🪴 Pot context
+                  </span>
+                )}
+              </h3>
+              <button 
+                onClick={() => setShowInfo(!showInfo)} 
+                className="p-1 rounded-full hover:bg-zinc-800 text-zinc-400 transition-colors"
+                title="How does Microclimate Profiling work?"
+              >
+                <Info className="w-4 h-4" />
+              </button>
+            </div>
             <p className="text-xs text-zinc-500 mt-0.5">
               30-day environmental fingerprint · plant matcher
               {isPot && " · pot-adjusted thresholds"}
@@ -283,6 +293,70 @@ export function MicroclimatProfileCard({
             <RefreshCw className={`w-3.5 h-3.5 ${isRecalculating ? 'animate-spin' : ''}`} />
             Sync
           </button>
+        </div>
+      </div>
+
+      {/* Info Card Panel */}
+      <div 
+        className={`overflow-hidden transition-all duration-300 ease-in-out border-b border-zinc-800 ${
+          showInfo ? "max-h-[1000px] opacity-100" : "max-h-0 opacity-0 border-transparent"
+        }`}
+      >
+        <div className="px-6 py-6 bg-zinc-900/80 text-sm">
+          <div className="flex justify-between items-start mb-5">
+            <h4 className="font-semibold text-white flex items-center gap-2 text-base">
+              <Info className="w-5 h-5 text-emerald-400" />
+              Understanding Microclimate Profiles
+            </h4>
+            <button onClick={() => setShowInfo(false)} className="text-zinc-500 hover:text-white p-1 bg-zinc-800/50 hover:bg-zinc-700 rounded-full transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl bg-zinc-800/40 border border-zinc-700/50">
+              <h5 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><Droplets className="w-4 h-4 text-blue-400"/> Drainage Phases (The most critical metric)</h5>
+              <div className="space-y-3">
+                <div className="text-xs text-zinc-400">
+                  <span className="font-semibold text-emerald-400 tracking-wide">PHASE 1 (Gravitational):</span> The initial rapid water drop after watering. <br/>
+                  <span className="text-zinc-300 mt-1 inline-block">Best/Rapid:</span> &gt;3.0 %/hr. <br/>
+                  <span className="text-red-400 inline-block">Very Bad:</span> &lt;0.8 %/hr (Roots are drowning in stagnant macropores without oxygen).
+                </div>
+                <div className="text-xs text-zinc-400 border-t border-zinc-700/50 pt-3">
+                  <span className="font-semibold text-blue-400 tracking-wide">PHASE 2 (Transit):</span> The time taken to cross from wet to moist (70% → 30%).<br/>
+                  <span className="text-zinc-300 mt-1 inline-block">Best/Ideal:</span> 24-72 hours (steady, even drying). <br/>
+                  <span className="text-red-400 inline-block">Very Bad:</span> &gt;96 hours (mesopore stagnation, chronic sogginess).
+                </div>
+                <div className="text-xs text-zinc-400 border-t border-zinc-700/50 pt-3">
+                  <span className="font-semibold text-amber-400 tracking-wide">PHASE 3 (Capillary ET):</span> Slow drying via evaporation and plant root drinking.<br/>
+                  <span className="text-zinc-300 mt-1 inline-block">Active ET:</span> &gt;0.5 %/hr. <br/>
+                  <span className="text-red-400 inline-block">Very Bad/Stagnant:</span> &lt;0.1 %/hr (The plant has stopped drinking or the air is completely stagnant).
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="p-4 rounded-xl bg-zinc-800/40 border border-zinc-700/50">
+                <h5 className="text-xs font-bold text-white mb-2 flex items-center gap-2"><Sun className="w-4 h-4 text-amber-400"/> Daily Light Integral (DLI)</h5>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Total photons hitting the plant per day. <br/><br/>
+                  <span className="text-zinc-300">Low (0-5):</span> Shade plants (Ferns, Pothos).<br/>
+                  <span className="text-zinc-300">Moderate (5-12):</span> Houseplants (Monstera).<br/>
+                  <span className="text-zinc-300">High (12+):</span> Succulents & crops.
+                </p>
+              </div>
+              
+              <div className="p-4 rounded-xl bg-zinc-800/40 border border-zinc-700/50">
+                <h5 className="text-xs font-bold text-white mb-2 flex items-center gap-2"><Wind className="w-4 h-4 text-teal-400"/> Vapor Pressure Deficit (VPD)</h5>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Atmospheric drying power.<br/><br/>
+                  <span className="text-red-400 font-medium">Low (&lt;0.5):</span> Fungal/rot risk (Too humid).<br/>
+                  <span className="text-emerald-400 font-medium">Optimal (0.8-1.2):</span> Perfect growth zone.<br/>
+                  <span className="text-orange-400 font-medium">High (&gt;1.5):</span> Dehydration stress (Too dry).
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

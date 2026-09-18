@@ -1,6 +1,7 @@
 "use client";
 
-import { AlertTriangle, Droplets, Zap, CheckCircle2, Circle, ShieldAlert } from "lucide-react";
+import { AlertTriangle, Droplets, Zap, CheckCircle2, Circle, ShieldAlert, Info, X } from "lucide-react";
+import { useState } from "react";
 import type { VPDDataPoint } from "./VPDChart";
 import type { DLIDataPoint } from "./DLIChart";
 import { type DrainageInput, type DrainageResult } from "@/lib/drainageAnalysis";
@@ -595,6 +596,8 @@ export function ThreatAlertsPanel({
 
   const isOptimal  = growth.status === "active";
 
+  const [showInfo, setShowInfo] = useState(false);
+
   return (
     <div id="sitter-mode" className="scroll-mt-32 rounded-3xl border border-zinc-700/60 bg-zinc-900/40 backdrop-blur-xl shadow-2xl overflow-hidden">
       {/* Header */}
@@ -614,7 +617,16 @@ export function ThreatAlertsPanel({
             }`} />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-white">Sitter Mode · Active Threat Monitor</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-semibold text-white">Sitter Mode · Active Threat Monitor</h3>
+              <button 
+                onClick={() => setShowInfo(!showInfo)} 
+                className="p-1 rounded-full hover:bg-zinc-800 text-zinc-400 transition-colors"
+                title="How does Sitter Mode work?"
+              >
+                <Info className="w-4 h-4" />
+              </button>
+            </div>
             <p className="text-xs text-zinc-500 mt-0.5">Real-time ecological threat status</p>
           </div>
         </div>
@@ -633,6 +645,71 @@ export function ThreatAlertsPanel({
             : "bg-zinc-500"
           }`} />
           {hasActive ? "THREAT DETECTED" : hasAtRisk ? "AT RISK" : isOptimal ? "ALL OPTIMAL" : "MONITORING"}
+        </div>
+      </div>
+
+      {/* Info Card Panel */}
+      <div 
+        className={`overflow-hidden transition-all duration-300 ease-in-out border-b border-zinc-800 ${
+          showInfo ? "max-h-[800px] opacity-100" : "max-h-0 opacity-0 border-transparent"
+        }`}
+      >
+        <div className="px-6 py-6 bg-zinc-900/80 text-sm">
+          <div className="flex justify-between items-start mb-5">
+            <h4 className="font-semibold text-white flex items-center gap-2 text-base">
+              <Info className="w-5 h-5 text-blue-400" />
+              Understanding Sitter Mode
+            </h4>
+            <button onClick={() => setShowInfo(false)} className="text-zinc-500 hover:text-white p-1 bg-zinc-800/50 hover:bg-zinc-700 rounded-full transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          
+          <div className="space-y-5">
+            <div>
+              <p className="text-zinc-300 mb-3 font-medium text-sm">Status Severities</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                  <div className="flex items-center gap-2 mb-1.5 text-emerald-400 font-bold text-[11px] tracking-wider"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> OPTIMAL / CLEAR</div>
+                  <p className="text-xs text-zinc-400 leading-relaxed">The best possible state. The environment is perfectly aligned with the plant&apos;s biological needs.</p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-orange-500/10 border border-orange-500/20">
+                  <div className="flex items-center gap-2 mb-1.5 text-orange-400 font-bold text-[11px] tracking-wider"><span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span> AT RISK / PARTIAL</div>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Not ideal. Some thresholds are outside the safe zone. An early warning to monitor conditions closely.</p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/20">
+                  <div className="flex items-center gap-2 mb-1.5 text-red-400 font-bold text-[11px] tracking-wider"><span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span> ACTIVE THREAT</div>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Very bad. Critical thresholds breached. Immediate action is required to prevent rot or severe stress.</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="space-y-3 mt-4 pt-5 border-t border-zinc-800/60">
+              <p className="text-zinc-300 font-medium text-sm">How Threats are Calculated</p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="bg-zinc-800/40 p-3.5 rounded-xl border border-zinc-700/50">
+                  <h5 className="text-xs font-bold text-white mb-1.5 flex items-center gap-2"><Droplets className="w-4 h-4 text-blue-400"/> Root Rot</h5>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Calculated by measuring structural soil stagnation (Phase 1/2 failure or &gt;75-85% prolonged moisture) combined with stagnant air (VPD &lt; 0.4 kPa). Both must occur to trigger a warning.</p>
+                </div>
+                
+                <div className="bg-zinc-800/40 p-3.5 rounded-xl border border-zinc-700/50">
+                  <h5 className="text-xs font-bold text-white mb-1.5 flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-orange-400"/> Dehydration</h5>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Calculated when soil is critically dry (&lt;10-20%) OR the plant stomata close (Phase 3 plateau &lt; 0.1 %/hr), combined with high atmospheric drought (VPD &gt; 1.6 kPa).</p>
+                </div>
+                
+                <div className="bg-zinc-800/40 p-3.5 rounded-xl border border-zinc-700/50">
+                  <h5 className="text-xs font-bold text-white mb-1.5 flex items-center gap-2"><Moon className="w-4 h-4 text-indigo-400"/> Light Pollution</h5>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Calculated by detecting sustained artificial light (&gt;30 mins) during the night cycle (21:00-06:00). Different plants tolerate different lux levels before circadian rhythm breaks.</p>
+                </div>
+                
+                <div className="bg-zinc-800/40 p-3.5 rounded-xl border border-zinc-700/50">
+                  <h5 className="text-xs font-bold text-white mb-1.5 flex items-center gap-2"><Zap className="w-4 h-4 text-emerald-400"/> Growth Optimization</h5>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Calculates if the "holy trinity" is perfectly aligned for vegetative growth: Ideal DLI range + well-oxygenated rapid drainage + stable VPD (0.8-1.2 kPa).</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

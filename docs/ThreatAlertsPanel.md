@@ -93,3 +93,9 @@ There are four visual states:
 - **MONITORING (Zinc/Grey):** Insufficient data or neutral state.
 
 Alert rows auto-expand to show detailed scientific explanations and checklist conditions when they enter the `active` or `at-risk` states, providing transparent reasoning for the alert.
+
+## In-Component Information Panel
+
+The panel features a toggleable help section (accessed via the `Info` icon in the header) which provides users with immediate, in-context explanations of:
+1. **Status Severities:** Explicit definitions for OPTIMAL/CLEAR, AT RISK/PARTIAL, and ACTIVE THREAT.
+2. **Calculation Methodologies:** A plain-English breakdown of what triggers each warning (e.g., specifying that Root Rot requires both structural soil stagnation and stagnant air).

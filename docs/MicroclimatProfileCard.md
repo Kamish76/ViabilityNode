@@ -33,6 +33,10 @@ When soil is heavily saturated (e.g., from a deep watering), water fills the lar
 
 This is the "Available Water Capacity" zone where water is held by surface tension. Gravity ceases to be the dominant force, and the soil stabilizes toward its field capacity. Phase 2 strictly evaluates the total time spent transiting from the 70% boundary down to the 30% boundary.
 
+- **Evaluation Criteria (30-Day Average):**
+  - **Ideal/Best:** $24$ – $72$ hours (Indicates steady, even drying).
+  - **Stagnant/Very Bad:** $> 96$ hours (Indicates mesopore stagnation and chronic sogginess).
+
 ---
 
 ## 3. Phase 3: Capillary & Evapotranspiration (<30% Moisture)
@@ -62,3 +66,12 @@ The UI is designed to present the 30-day averages in a detailed 3-column `Draina
 To prevent UI glitches or negative percentages, the system applies hardcoded limits to raw ADC values from the Capacitive Soil Moisture Sensor v1.2:
 - **Dry Baseline (0%):** 1920 ADC
 - **Wet Baseline (100%):** 880 ADC
+
+---
+
+## In-Component Information Panel
+
+To assist users in interpreting these biophysical metrics without leaving the dashboard, the card includes a built-in toggleable help panel (accessed via the `Info` icon in the header). This panel clarifies:
+- The meaning of each drainage phase and its thresholds (Rapid/Best vs. Stagnant/Very Bad).
+- The implications of Daily Light Integral (DLI) ranges for different plant types.
+- The significance of Vapor Pressure Deficit (VPD) zones (e.g., Fungal risk vs. Ideal growth vs. Dehydration stress).
