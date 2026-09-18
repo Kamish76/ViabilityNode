@@ -41,17 +41,12 @@ const ANALYSIS_WINDOW_MS = 5 * 24 * 60 * 60 * 1000; // 5 days
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export interface MoistureReading {
-  recorded_at: string;
-  moisture_pct: number;
-}
-
-export interface WateringEvent {
-  spikeIdx: number;       // Index where the jump was detected
-  peakIdx: number;        // Index of the peak moisture after the spike
-  peakMoisture: number;   // The peak % value
-  peakTimestamp: string;  // ISO timestamp of the peak
-}
+import {
+  type MoistureReading,
+  type WateringEvent,
+  medianFilter,
+  detectWateringEvents,
+} from "./sensorUtils";
 
 export interface PiecewiseDrainageResult {
   // ── Piecewise velocities (Report Section 4) ──
@@ -116,57 +111,7 @@ function hoursElapsed(startMs: number, endMs: number): number {
   return (endMs - startMs) / (1000 * 60 * 60);
 }
 
-/**
- * Apply a lightweight median filter (window size 3) to strip ADC glitches.
- * Matches the existing filter in DrainageCard.tsx.
- */
-function medianFilter<T extends MoistureReading>(data: T[]): T[] {
-  return data.map((d, i) => {
-    const win = data.slice(Math.max(0, i - 1), Math.min(data.length, i + 2));
-    const vals = win.map(w => w.moisture_pct).sort((a, b) => a - b);
-    return { ...d, moisture_pct: vals[Math.floor(vals.length / 2)] };
-  });
-}
 
-/**
- * Detect watering events — significant moisture spikes.
- * Reuses the same spike detection algorithm from DrainageCard.tsx.
- */
-function detectWateringEvents(data: MoistureReading[]): WateringEvent[] {
-  const events: WateringEvent[] = [];
-
-  for (let i = 1; i < data.length; i++) {
-    const delta = data[i].moisture_pct - data[i - 1].moisture_pct;
-    if (delta >= SPIKE_THRESHOLD) {
-      const spikeTime = toMs(data[i].recorded_at);
-      const searchEnd = spikeTime + PEAK_SEARCH_WINDOW_MS;
-
-      let peakIdx = i;
-      let peakVal = data[i].moisture_pct;
-
-      for (let j = i; j < data.length; j++) {
-        if (toMs(data[j].recorded_at) > searchEnd) break;
-        if (data[j].moisture_pct > peakVal) {
-          peakVal = data[j].moisture_pct;
-          peakIdx = j;
-        }
-      }
-
-      // Avoid duplicates for the same event
-      const lastEvent = events[events.length - 1];
-      if (!lastEvent || peakIdx !== lastEvent.peakIdx) {
-        events.push({
-          spikeIdx: i,
-          peakIdx,
-          peakMoisture: peakVal,
-          peakTimestamp: data[peakIdx].recorded_at,
-        });
-      }
-    }
-  }
-
-  return events;
-}
 
 /**
  * Determine which phase a moisture reading is in.
@@ -198,6 +143,7 @@ function computeVelocities(
   phase2DurationHours: number | null;
   phase3DurationHours: number | null;
   retentionHours: number | null;
+  transit70to50Hours: number | null;
 } {
   const peakTimeMs = toMs(data[event.peakIdx].recorded_at);
   const peakMoisture = event.peakMoisture;

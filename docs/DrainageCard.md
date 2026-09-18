@@ -1,6 +1,6 @@
 # Soil Water Dynamics — Observed Retention Analysis
 
-> Complete technical documentation for [`DrainageCard.tsx`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/DrainageCard.tsx) and its companion library [`piecewiseDrainage.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/piecewiseDrainage.ts)
+> Complete technical documentation for [`DrainageCard.tsx`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/DrainageCard.tsx), the core analytical engine [`drainageAnalysis.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/drainageAnalysis.ts), its companion library [`piecewiseDrainage.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/piecewiseDrainage.ts), and the shared utility module [`sensorUtils.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/sensorUtils.ts).
 
 ---
 
@@ -12,10 +12,11 @@ It does this through two complementary analysis engines:
 
 | Engine | Function | Location |
 |--------|----------|----------|
-| **`analyzeDrainage()`** | Retention-based classification — measures total hours from peak to a 10% drop | [`DrainageCard.tsx:135–398`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/DrainageCard.tsx#L135-L398) |
-| **`analyzePiecewiseDrainage()`** | Three-phase biophysical model — splits the drainage curve into gravitational, field-capacity, and capillary/ET segments | [`piecewiseDrainage.ts:359–440`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/piecewiseDrainage.ts#L359-L440) |
+| **`analyzeDrainage()`** | Retention-based classification — measures total hours from peak to a 10% drop | [`drainageAnalysis.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/drainageAnalysis.ts) |
+| **`analyzePiecewiseDrainage()`** | Three-phase biophysical model — splits the drainage curve into gravitational, field-capacity, and capillary/ET segments | [`piecewiseDrainage.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/piecewiseDrainage.ts) |
+| **`sensorUtils.ts`** | Centralized filtering (median filter) and watering event detection used by both engines | [`sensorUtils.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/sensorUtils.ts) |
 
-Both engines consume the same input data and are invoked in parallel inside the card's render function.
+Both analysis engines consume the same input data. The heavy calculations are orchestrated centrally in `DashboardClient.tsx`, which then passes the `DrainageResult` and `PiecewiseDrainageResult` down to the UI components (like `DrainageCard` and `ThreatAlertsPanel`) to prevent redundant processing.
 
 ---
 
@@ -23,23 +24,22 @@ Both engines consume the same input data and are invoked in parallel inside the 
 
 ```mermaid
 graph TD
-    A["Raw Sensor Readings<br/>(recorded_at, moisture_pct, raw)"] --> B["DrainageCard Component"]
+    A["Raw Sensor Readings<br/>(recorded_at, moisture_pct, raw)"] --> B["DashboardClient Orchestrator"]
     B --> C["analyzeDrainage()"]
     B --> D["analyzePiecewiseDrainage()"]
-    B --> E["getRecentRawData()"]
     C --> F["DrainageResult<br/>(category, retentionHours, etc.)"]
     D --> G["PiecewiseDrainageResult<br/>(vGrav, vDry, phases)"]
-    E --> H["Recharts AreaChart<br/>(5-day thinned data)"]
-    F --> I["Card UI: Header, Hero, Stats"]
-    G --> J["Card UI: Phase Bar, Velocities"]
-    F --> K["Downstream: MicroclimatProfileCard<br/>(via drainClass mapping)"]
+    F --> I["DrainageCard Component"]
+    G --> I
+    I --> H["Recharts AreaChart<br/>(5-day thinned data)"]
+    F --> K["Downstream: ThreatAlertsPanel &<br/>MicroclimatProfileCard"]
 ```
 
 ---
 
 ## 3. Input Contract
 
-### [`DrainageInput`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/DrainageCard.tsx#L32-L36)
+### [`DrainageInput`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/drainageAnalysis.ts)
 
 ```typescript
 interface DrainageInput {
@@ -60,7 +60,7 @@ Before ingestion, the raw ADC counts are transformed into `moisture_pct` using t
 
 $$ \text{moisture\_pct} = \left( \frac{\text{ADC}_{\text{dry}} - \text{ADC}_{\text{raw}}}{\text{ADC}_{\text{dry}} - \text{ADC}_{\text{wet}}} \right) \times 100 $$
 
-Documenting this calibration transformation ensures component inputs align with raw micro-controller payloads.
+This logic is centralized in `src/lib/sensorUtils.ts` via the `calculateMoisturePct` function. Documenting this calibration transformation ensures component inputs align with raw micro-controller payloads.
 
 > [!IMPORTANT]
 > The module requires **at least 6 readings** and **at least 2 readings within the last 5 days** to produce any result other than `"insufficient"`.
@@ -83,6 +83,8 @@ Documenting this calibration transformation ensures component inputs align with 
 ---
 
 ## 5. Engine 1: `analyzeDrainage()` — Retention Classification
+
+This engine resides in `src/lib/drainageAnalysis.ts`.
 
 ### 5.1 Processing Pipeline
 
@@ -151,7 +153,7 @@ The algorithm scans forward through post-peak readings:
 | **`no-event`** | No watering events detected in 5 days | null | `"unknown"` |
 | **`insufficient`** | < 6 readings or < 2 in 5-day window | null | `"unknown"` |
 
-### 5.3 Output: [`DrainageResult`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/DrainageCard.tsx#L48-L73)
+### 5.3 Output: [`DrainageResult`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/drainageAnalysis.ts)
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -415,7 +417,7 @@ The `drainClass` field (backward-compatible mapping of `"rapid" | "moderate" | "
 
 ### ThreatAlertsPanel & Sitter Mode
 
-The [`ThreatAlertsPanel`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/ThreatAlertsPanel.tsx) and the **Sitter Mode** interface explicitly map output fields from `piecewiseDrainage.ts` to active threat monitors:
+The [`ThreatAlertsPanel`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/ThreatAlertsPanel.tsx) and the **Sitter Mode** interface receive the pre-calculated `drainageResult` from the dashboard and explicitly map output fields to active threat monitors:
 
 - **Rot Warning (Hypoxic / Macropore Failure)**: Triggered when `phase1Failure === true` and `hoursAbove70 > 24` combined with low $V_{\text{grav}}$.
 - **Dehydration Warning**: Triggered by Phase 3 saturation loss, driven by low moisture coupled with high $V_{\text{dry}}$ and extreme `vpd_kpa` values.
@@ -491,7 +493,9 @@ Time     Moisture%    What happens
 |------------|-------|
 | `lucide-react` | Icons: Waves, Droplets, TrendingDown/Up, AlertTriangle, Clock, ArrowRight, Gauge, Wind |
 | `recharts` | AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine |
-| `@/lib/piecewiseDrainage` | `analyzePiecewiseDrainage()`, `PiecewiseDrainageResult`, `PHASE_1_BOUNDARY`, `PHASE_3_BOUNDARY` |
+| `@/lib/drainageAnalysis` | `analyzeDrainage()`, `DrainageResult`, `DrainageInput`, `DrainCategory` |
+| `@/lib/piecewiseDrainage` | `analyzePiecewiseDrainage()`, `PiecewiseDrainageResult` |
+| `@/lib/sensorUtils` | `medianFilter()`, `detectWateringEvents()` |
 
 ---
 
@@ -507,10 +511,12 @@ Time     Moisture%    What happens
 
 ## 15. Exports Summary
 
-| Export | Type | Description |
-|--------|------|-------------|
-| `DrainageInput` | interface | Input data shape |
-| `DrainCategory` | type | 7-value union type for classification |
-| `DrainageResult` | interface | Full output from `analyzeDrainage()` |
-| `analyzeDrainage()` | function | Retention-based analysis engine |
-| `DrainageCard` | React component | Main UI component |
+| Export | Location | Description |
+|--------|----------|-------------|
+| `DrainageInput` | `drainageAnalysis.ts` | Input data shape |
+| `DrainCategory` | `drainageAnalysis.ts` | 7-value union type for classification |
+| `DrainageResult` | `drainageAnalysis.ts` | Full output from `analyzeDrainage()` |
+| `analyzeDrainage()` | `drainageAnalysis.ts` | Retention-based analysis engine |
+| `medianFilter()` | `sensorUtils.ts` | Signal de-noising |
+| `detectWateringEvents()`| `sensorUtils.ts` | Spikes / Event peak detection |
+| `DrainageCard` | `DrainageCard.tsx` | Main UI presentation component |

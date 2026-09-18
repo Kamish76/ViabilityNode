@@ -22,7 +22,7 @@ import { createClient } from "@/utils/supabase/client";
 import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
 import { VPDChart, type VPDDataPoint } from "./components/VPDChart";
 import { AtmosphericCorrelationChart } from "./components/AtmosphericCorrelationChart";
-import { DrainageCard, type DrainageInput } from "./components/DrainageCard";
+import { DrainageCard } from "./components/DrainageCard";
 import { MicroclimatProfileCard, type PrecalculatedProfile } from "./components/MicroclimatProfileCard";
 import {
   ThreatAlertsPanel,
@@ -35,6 +35,8 @@ import { DeploymentPanel, type Deployment } from "./components/DeploymentPanel";
 import { TrialProgressCard } from "./components/TrialProgressCard";
 import { SideNav } from "./components/SideNav";
 import { SummaryDashboard, type DailySummaryData } from "./components/SummaryDashboard";
+import { calculateMoisturePct } from "@/lib/sensorUtils";
+import { analyzeDrainage, type DrainageInput, type DrainageResult } from "@/lib/drainageAnalysis";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,10 +59,7 @@ export interface BatterySnapshot {
   battery_pct: number;
 }
 
-const HARDCODED_CALIBRATION = {
-  dryLimit: 1920,
-  wetLimit: 880,
-};
+
 
 
 // ─── Calculations ─────────────────────────────────────────────────────────────
@@ -84,12 +83,7 @@ function calculateVPD(tempC: number, humidityRH: number, lux: number = 0): numbe
   return Math.max(0, eSatLeaf - eActAir);
 }
 
-function calculateMoisturePct(rawADC: number): number {
-  const { dryLimit, wetLimit } = HARDCODED_CALIBRATION;
-  if (dryLimit === wetLimit) return 0;
-  const pct = ((dryLimit - rawADC) / (dryLimit - wetLimit)) * 100;
-  return Math.max(0, Math.min(100, pct));
-}
+
 
 /**
  * Estimate days of battery remaining using a 7-day rolling drop rate.
@@ -305,9 +299,10 @@ export function DashboardClient({
   // Calculate overall viability status
   const currentPlantType = currentDeployment?.plant_type || null;
   const isPot = placementType === "pot";
+  const drainageResult = analyzeDrainage(historicalDrainageData, currentPlantType);
   const rot = evalRotWarning(historicalDrainageData, historicalVpd, historicalLatestMoisture, isPot, currentPlantType, piecewiseResult);
   const dehy = evalDehydrationWarning(historicalDrainageData, historicalVpd, historicalLatestMoisture, isPot, currentPlantType, piecewiseResult);
-  const growth = evalGrowthOptimization(historicalDli, historicalDrainageData, historicalVpd, currentPlantType);
+  const growth = evalGrowthOptimization(historicalDli, historicalVpd, currentPlantType, drainageResult);
 
   const hasActiveThreat = rot.status === "active" || dehy.status === "active";
   const hasRisk = rot.status === "at-risk" || dehy.status === "at-risk";
@@ -388,6 +383,7 @@ export function DashboardClient({
                   placementType={placementType}
                   plantType={currentDeployment?.plant_type || null}
                   piecewise={piecewiseResult}
+                  drainageResult={drainageResult}
                 />
               </div>
 
@@ -512,7 +508,7 @@ export function DashboardClient({
                   <VPDChart data={vpdHistory} rollingAvg={vpdRollingAvg} />
 
                   {/* 2.2 — Soil Drainage Velocity */}
-                  <DrainageCard data={drainageData} plantType={currentPlantType} />
+                  <DrainageCard data={drainageData} plantType={currentPlantType} precalculatedResult={analyzeDrainage(drainageData, currentPlantType)} precalculatedPiecewise={analyzePiecewiseDrainage(drainageData)} />
                 </div>
 
                 {/* 2.4 — Atmospheric Correlation */}

@@ -3,7 +3,7 @@
 import { AlertTriangle, Droplets, Zap, CheckCircle2, Circle, ShieldAlert } from "lucide-react";
 import type { VPDDataPoint } from "./VPDChart";
 import type { DLIDataPoint } from "./DLIChart";
-import { DrainageInput, analyzeDrainage } from "./DrainageCard";
+import { type DrainageInput, type DrainageResult } from "@/lib/drainageAnalysis";
 import { Moon } from "lucide-react";
 import {
   analyzePiecewiseDrainage,
@@ -232,9 +232,9 @@ export function evalDehydrationWarning(
 
 export function evalGrowthOptimization(
   dliHistory: DLIDataPoint[],
-  drainageData: DrainageInput[],
   vpdHistory: VPDDataPoint[],
   plantType: string | null,
+  drainResult: DrainageResult
 ): ThreatResult {
   // Latest DLI (today or most recent day)
   const latestDLI = dliHistory.length > 0
@@ -259,7 +259,6 @@ export function evalGrowthOptimization(
   const dliTooLow  = latestDLI !== null && latestDLI < minDli;
   const dliTooHigh = latestDLI !== null && latestDLI > maxDli;
 
-  const drainResult = analyzeDrainage(drainageData, plantType);
   let drainGood = drainResult.drainClass === "rapid" || drainResult.drainClass === "moderate";
 
   const isSucculent = plantType === "succulent" || plantType === "cactus";
@@ -538,6 +537,7 @@ export function ThreatAlertsPanel({
   placementType,
   plantType,
   piecewise,
+  drainageResult,
 }: {
   drainageData:   DrainageInput[];
   vpdHistory30:   VPDDataPoint[];
@@ -547,11 +547,12 @@ export function ThreatAlertsPanel({
   placementType?: string | null;
   plantType?:     string | null;
   piecewise?:     PiecewiseDrainageResult | null;
+  drainageResult: DrainageResult;
 }) {
   const isPot = placementType === "pot";
   const rot          = evalRotWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null, piecewise);
   const dehydration  = evalDehydrationWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null, piecewise);
-  const growth       = evalGrowthOptimization(dliHistory, drainageData, vpdHistory30, plantType || null);
+  const growth       = evalGrowthOptimization(dliHistory, vpdHistory30, plantType || null, drainageResult);
   const lightPol     = evalNightLightWarning(logs, plantType || null);
 
   const hasActive  = rot.status === "active"    || dehydration.status === "active" || lightPol.status === "active";

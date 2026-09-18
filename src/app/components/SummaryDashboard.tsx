@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { TrendingUp, TrendingDown, Minus, Thermometer, Droplets, Wind, Sun, Leaf, Copy, Check } from "lucide-react";
-import { analyzeDrainage, type DrainageInput } from "./DrainageCard";
+import { type DrainageInput, analyzeDrainage } from "@/lib/drainageAnalysis";
 import type { PiecewiseDrainageResult } from "@/lib/piecewiseDrainage";
 
 export interface DaySummary {
