@@ -67,11 +67,11 @@ Monitors for Artificial Light at Night (ALAN) that disrupts biological photoperi
 - **Tropical:** `>25 lux` (Active), `>12 lux` (At-risk).
 
 ### 4. Growth Optimization (`evalGrowthOptimization`)
-Unlike the others, this is a positive indicator. It checks if the "holy trinity" of vegetative growth conditions are perfectly aligned.
+Unlike the others, this is a positive indicator. It checks if the "holy trinity" of vegetative growth conditions are perfectly aligned. Because growth is a long-term ecological metric, this evaluator explicitly relies on historical aggregates.
 
 **Triggers (All three must be met for 'Active' / 'Optimal' status):**
 1. **Light:** Recent Daily Light Integral (DLI) is within the plant's target range.
-2. **Soil:** Drainage class is "rapid" or "moderate", OR for succulents, the soil is in an "optimal dry" state (`<30%` moisture).
+2. **Soil:** Evaluates the 30-day soil structure "fingerprint". The `piecewise.drainClass` (a 30-day average) must be "rapid" or "moderate". If insufficient historical data exists (< 2 events), it seamlessly falls back to grading the single most recent watering event. *(Note: For succulents, being currently in an "optimal dry" state of `<30%` moisture also fulfills this requirement regardless of the 30-day drainage speed).*
 3. **Atmosphere:** 7-day VPD average is stable in the ideal vegetative zone (`0.8 – 1.2 kPa`).
 
 **DLI Ranges by Plant Type:**

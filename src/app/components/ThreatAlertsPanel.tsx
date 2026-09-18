@@ -241,7 +241,8 @@ export function evalGrowthOptimization(
   dliHistory: DLIDataPoint[],
   vpdHistory: VPDDataPoint[],
   plantType: string | null,
-  drainResult: DrainageResult
+  drainResult: DrainageResult,
+  piecewise?: PiecewiseDrainageResult | null
 ): ThreatResult {
   // Latest DLI (today or most recent day)
   const latestDLI = dliHistory.length > 0
@@ -266,13 +267,33 @@ export function evalGrowthOptimization(
   const dliTooLow  = latestDLI !== null && latestDLI < minDli;
   const dliTooHigh = latestDLI !== null && latestDLI > maxDli;
 
-  let drainGood = drainResult.drainClass === "rapid" || drainResult.drainClass === "moderate";
+  let drainGood = false;
+  let drainLabel = "30-day soil structure optimal (not stagnant)";
+  let drainValue = "Monitoring...";
 
   const isSucculent = plantType === "succulent" || plantType === "cactus";
   const isOptimalDry = isSucculent && (drainResult.category === "no-event" || (drainResult.currentMoisture !== null && drainResult.currentMoisture < 30));
 
   if (isOptimalDry) {
     drainGood = true;
+    drainLabel = "30-day soil structure optimal or in dry phase";
+    drainValue = `Optimal dry state (${drainResult.currentMoisture?.toFixed(0) ?? 0}%)`;
+  } else if (piecewise && piecewise.drainClass !== "unknown") {
+    drainGood = piecewise.drainClass === "rapid" || piecewise.drainClass === "moderate";
+    drainLabel = isSucculent ? "30-day soil structure optimal or in dry phase" : "30-day soil structure optimal (not stagnant)";
+    drainValue = piecewise.drainClass === "rapid" ? "Rapid drainage (30-day avg)" : 
+                 piecewise.drainClass === "moderate" ? "Moderate drainage (30-day avg)" :
+                 "Stagnant drainage (30-day avg)";
+  } else {
+    drainGood = drainResult.drainClass === "rapid" || drainResult.drainClass === "moderate";
+    drainLabel = isSucculent ? "Soil properly draining or in optimal dry phase" : "Soil draining properly (not stagnant)";
+    if (drainResult.retentionHours !== null) {
+      drainValue = `${drainResult.retentionHours.toFixed(1)}h retention`;
+    } else if (drainResult.category === "no-event") {
+      drainValue = "No watering event detected";
+    } else {
+      drainValue = "Still retaining — monitoring";
+    }
   }
 
   const vpd7d = recentVpdAvg(vpdHistory, 7 * 24);
@@ -301,15 +322,9 @@ export function evalGrowthOptimization(
           : "No DLI data yet",
       },
       {
-        label: isSucculent ? "Soil properly draining or in optimal dry phase" : "Soil draining properly (not stagnant)",
+        label: drainLabel,
         met:   drainGood,
-        value: isOptimalDry
-          ? `Optimal dry state (${drainResult.currentMoisture?.toFixed(0) ?? 0}%)`
-          : drainResult.retentionHours !== null
-          ? `${drainResult.retentionHours.toFixed(1)}h retention`
-          : drainResult.category === "no-event"
-          ? "No watering event detected"
-          : "Still retaining — monitoring",
+        value: drainValue,
       },
       {
         label: "VPD in stable zone (0.8–1.2 kPa)",
@@ -559,7 +574,7 @@ export function ThreatAlertsPanel({
   const isPot = placementType === "pot";
   const rot          = evalRotWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null, piecewise);
   const dehydration  = evalDehydrationWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null, piecewise);
-  const growth       = evalGrowthOptimization(dliHistory, vpdHistory30, plantType || null, drainageResult);
+  const growth       = evalGrowthOptimization(dliHistory, vpdHistory30, plantType || null, drainageResult, piecewise);
   const lightPol     = evalNightLightWarning(logs, plantType || null);
 
   const hasActive  = rot.status === "active"    || dehydration.status === "active" || lightPol.status === "active";
