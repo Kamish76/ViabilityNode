@@ -265,9 +265,10 @@ function analyzeCurrentPhase(data: MoistureReading[]): {
   currentPhase: 1 | 2 | 3 | null;
   currentPhaseSince: string | null;
   hoursAbove70: number | null;
+  hoursAbove50: number | null;
 } {
   if (data.length === 0) {
-    return { currentPhase: null, currentPhaseSince: null, hoursAbove70: null };
+    return { currentPhase: null, currentPhaseSince: null, hoursAbove70: null, hoursAbove50: null };
   }
 
   const latest = data[data.length - 1];
@@ -282,15 +283,30 @@ function analyzeCurrentPhase(data: MoistureReading[]): {
 
   const currentPhaseSince = data[phaseSinceIdx].recorded_at;
 
-  // Hours above 70% — continuous count backward from latest
+  // Hours above 70% & 50% — continuous count backward from latest, regardless of watering spikes
   let hoursAbove70: number | null = null;
-  if (currentPhase === 1) {
-    const latestMs = toMs(latest.recorded_at);
-    const sinceMs = toMs(currentPhaseSince);
-    hoursAbove70 = hoursElapsed(sinceMs, latestMs);
+  let hoursAbove50: number | null = null;
+  const latestMs = toMs(latest.recorded_at);
+
+  if (latest.moisture_pct > PHASE_1_BOUNDARY) {
+    let crossed70Idx = data.length - 1;
+    for (let i = data.length - 2; i >= 0; i--) {
+      if (data[i].moisture_pct <= PHASE_1_BOUNDARY) break;
+      crossed70Idx = i;
+    }
+    hoursAbove70 = hoursElapsed(toMs(data[crossed70Idx].recorded_at), latestMs);
   }
 
-  return { currentPhase, currentPhaseSince, hoursAbove70 };
+  if (latest.moisture_pct > PHASE_2_LOWER) {
+    let crossed50Idx = data.length - 1;
+    for (let i = data.length - 2; i >= 0; i--) {
+      if (data[i].moisture_pct <= PHASE_2_LOWER) break;
+      crossed50Idx = i;
+    }
+    hoursAbove50 = hoursElapsed(toMs(data[crossed50Idx].recorded_at), latestMs);
+  }
+
+  return { currentPhase, currentPhaseSince, hoursAbove70, hoursAbove50 };
 }
 
 // ─── drainClass mapping ──────────────────────────────────────────────────────
@@ -474,9 +490,18 @@ export function analyzePiecewiseDrainage(
     phaseInfo.hoursAbove70 > 24 &&
     (currentVelocities.vGrav === null || currentVelocities.vGrav < 0.5);
 
-  // Phase 2 Failure: transit time between 70% and 50% > 96h (Uses CURRENT velocities)
-  const phase2Failure = currentVelocities.transit70to50Hours !== null && currentVelocities.transit70to50Hours > 96;
+  const latestMoisture = filtered.length > 0 ? filtered[filtered.length - 1].moisture_pct : 0;
+  const hoursSincePeak = filtered.length > 0 ? hoursElapsed(toMs(currentEvent.peakTimestamp), toMs(filtered[filtered.length - 1].recorded_at)) : 0;
 
+  // Phase 2 Failure: transit time between 70% and 50% > 96h
+  // Triggers if:
+  // 1. It completed the transit and it took >96h
+  // 2. OR it's currently stuck >50% for >96h since the current watering peak
+  // 3. OR it has been continuously >50% for >96h across multiple waterings without a dry breath
+  const phase2Failure = 
+    (currentVelocities.transit70to50Hours !== null && currentVelocities.transit70to50Hours > 96) ||
+    (currentVelocities.transit70to50Hours === null && latestMoisture > 50 && hoursSincePeak > 96) ||
+    (phaseInfo.hoursAbove50 !== null && phaseInfo.hoursAbove50 > 96);
   // Phase 3 Warning: rapid loss > 0.5%/hr indicates high demand (Uses CURRENT velocities)
   const phase3Warning = currentVelocities.vDry !== null && currentVelocities.vDry > 0.5;
 
