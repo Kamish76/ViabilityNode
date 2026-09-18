@@ -1,9 +1,10 @@
 "use client";
 
-import { AlertTriangle, Droplets, Zap, CheckCircle2, Circle, ShieldAlert } from "lucide-react";
+import { AlertTriangle, Droplets, Zap, CheckCircle2, Circle, ShieldAlert, Info, X } from "lucide-react";
+import { useState } from "react";
 import type { VPDDataPoint } from "./VPDChart";
 import type { DLIDataPoint } from "./DLIChart";
-import { DrainageInput, analyzeDrainage } from "./DrainageCard";
+import { type DrainageInput, type DrainageResult } from "@/lib/drainageAnalysis";
 import { Moon } from "lucide-react";
 import {
   analyzePiecewiseDrainage,
@@ -67,8 +68,8 @@ export function evalRotWarning(
   // Plant-specific adjustments
   if (plantType === "succulent") {
     // Succulents rot very easily, lower tolerance
-    satThreshold = isPot ? 60 : 70;
-    windowHours = 24; 
+    satThreshold = isPot ? 75 : 75;
+    windowHours = isPot ? 48 : 72; 
   } else if (plantType === "carnivorous") {
     // Carnivorous/bog plants naturally live in bogs, extremely high rot tolerance
     satThreshold = 95;
@@ -78,18 +79,23 @@ export function evalRotWarning(
   const moisture = recentMoistureStats(drainageData, windowHours);
   const vpd48hAvg   = recentVpdAvg(vpdHistory, 48);
 
-  // ── Enhanced Phase 1 Failure detection (Report Section 5, Trigger 1) ──
-  // If piecewise data is available, use V_grav to detect macropore drainage failure.
-  // This replaces the blunt stdDev < flatThreshold check with a physically meaningful diagnostic.
+  // ── Enhanced Phase 1 & 2 Failure detection (Report Section 5) ──
+  // If piecewise data is available, use V_grav and transit times to detect macropore/mesopore stagnation.
   let highAndFlat: boolean;
+  let phase2Failed = false;
+  let phase1Failed = false;
 
   if (piecewise && piecewise.wateringEvents > 0) {
     // Phase 1 Failure: moisture is high AND gravitational clearance is inadequate
-    const phase1Failed = piecewise.phase1Failure ||
+    phase1Failed = piecewise.phase1Failure ||
       (piecewise.vGrav !== null && piecewise.vGrav < 0.5) ||
       (piecewise.hoursAbove70 !== null && piecewise.hoursAbove70 > windowHours);
     
-    highAndFlat = moisture !== null && moisture.avg >= satThreshold && phase1Failed;
+    // Phase 2 Failure: transit time from 70% to 50% takes >96h (mesopore stagnation)
+    phase2Failed = !!piecewise.phase2Failure;
+    
+    // Trigger if Phase 1 failed (while saturated) OR if Phase 2 transit failed (chronic sogginess)
+    highAndFlat = (moisture !== null && moisture.avg >= satThreshold && phase1Failed) || phase2Failed;
   } else {
     // Fallback: original stdDev-based flatness check when piecewise data unavailable
     highAndFlat =
@@ -106,15 +112,23 @@ export function evalRotWarning(
   const status: AlertStatus = active ? "active" : atRisk ? "at-risk" : "clear";
 
   // Condition labels — use piecewise terminology when available
-  const moistureConditionLabel = piecewise && piecewise.wateringEvents > 0
-    ? `Phase 1 gravitational clearance < 0.5 %/hr (macropore drainage failure, ${plantType || 'standard'})`
-    : `Soil ≥ ${satThreshold}% moisture, flat for ${windowHours}h (${plantType || 'standard'} adjusted)`;
+  const moistureConditionLabel = (() => {
+    if (piecewise && piecewise.wateringEvents > 0) {
+      if (phase2Failed) return `Phase 2 transit failure (>96h between 70%–50%) — mesopore stagnation`;
+      return `Phase 1 gravitational clearance < 0.5 %/hr (macropore failure, ${plantType || 'standard'})`;
+    }
+    return `Soil ≥ ${satThreshold}% moisture, flat for ${windowHours}h (${plantType || 'standard'} adjusted)`;
+  })();
 
   const moistureConditionValue = (() => {
     if (piecewise && piecewise.wateringEvents > 0) {
       const parts: string[] = [];
-      if (piecewise.vGrav !== null) parts.push(`V_grav: ${piecewise.vGrav.toFixed(2)} %/hr`);
-      if (piecewise.hoursAbove70 !== null) parts.push(`${piecewise.hoursAbove70.toFixed(1)}h above 70%`);
+      if (phase2Failed && piecewise.transit70to50Hours !== null) {
+        parts.push(`transit: ${piecewise.transit70to50Hours.toFixed(1)}h`);
+      } else {
+        if (piecewise.vGrav !== null) parts.push(`V_grav: ${piecewise.vGrav.toFixed(2)} %/hr`);
+        if (piecewise.hoursAbove70 !== null) parts.push(`${piecewise.hoursAbove70.toFixed(1)}h >70%`);
+      }
       if (moisture) parts.push(`avg ${moisture.avg.toFixed(1)}%`);
       return parts.length > 0 ? parts.join(' · ') : "Insufficient data";
     }
@@ -125,12 +139,12 @@ export function evalRotWarning(
     status,
     title: "Rot Warning",
     headline: active
-      ? "Soil saturated & air stagnant — root-zone hypoxia imminent"
+      ? "Soil structurally stagnant & air stagnant — root-zone hypoxia imminent"
       : atRisk
       ? "One of two rot conditions detected — monitor closely"
       : "No rot risk detected",
     detail: piecewise && piecewise.wateringEvents > 0
-      ? "Root rot triggers when Phase 1 gravitational drainage fails (macropores blocked, no oxygen replenishment) while chronically low VPD prevents the plant from transpiring water upward. Both conditions must persist simultaneously."
+      ? "Root rot triggers when either Phase 1 (macropore clearance) or Phase 2 (mesopore transit) structurally fails, cutting off root oxygen, while chronically low VPD prevents upward transpiration. Both soil stagnation and atmospheric stagnation must persist simultaneously."
       : "Root rot triggers when soil stays saturated (no oxygen replenishment) while chronically low VPD prevents the plant from transpiring water upward. Both conditions must persist simultaneously.",
     conditions: [
       {
@@ -160,8 +174,8 @@ export function evalDehydrationWarning(
   let vpdDanger = 1.6; // Updated from 1.5 per Report Section 5
 
   if (plantType === "succulent") {
-    // Succulents thrive in dry conditions
-    dryThreshold = 5;
+    // Succulents thrive in dry conditions, but dropping below 10% risks tissue damage under high VPD
+    dryThreshold = 10;
     vpdDanger = 2.0;
   } else if (plantType === "carnivorous") {
     // Bog plants dry out extremely fast and die
@@ -176,10 +190,17 @@ export function evalDehydrationWarning(
   const highVPD = vpd7d !== null && vpd7d > vpdDanger;
 
   // ── Enhanced Phase 3 Plateau detection (Report Section 5, Trigger 2) ──
-  // If V_dry < 0.1 %/hr, the soil is in a capillary stagnation zone.
-  // The plant has likely stopped transpiring (stomatal closure) — a sign of
-  // drought stress even if moisture hasn't hit the absolute dry threshold.
-  const phase3Plateau = piecewise?.vDry !== null && piecewise?.vDry !== undefined && piecewise.vDry < 0.1;
+  // If V_dry drops below a critical threshold, the soil is in a capillary stagnation zone.
+  // The plant has likely stopped transpiring (stomatal closure) — a sign of drought stress.
+  const vDryStagnation = 0.1;
+  let phase3Plateau = false;
+
+  if (plantType !== "succulent") {
+    // CAM plants (succulents) naturally keep stomata closed during the day (near-zero V_dry).
+    // The Phase 3 plateau early warning does not apply to them.
+    phase3Plateau = piecewise?.vDry !== null && piecewise?.vDry !== undefined && piecewise.vDry < vDryStagnation;
+  }
+  
   const phase3StressDetected = phase3Plateau && highVPD;
 
   // Original trigger: dry soil + high VPD
@@ -202,12 +223,12 @@ export function evalDehydrationWarning(
     },
   ];
 
-  // Add Phase 3 plateau condition when piecewise data is available
-  if (piecewise && piecewise.wateringEvents > 0) {
+  // Add Phase 3 plateau condition when piecewise data is available and vDry is calculated
+  if (piecewise && piecewise.vDry !== null && plantType !== "succulent") {
     conditions.push({
-      label: "Phase 3 plateau: V_dry < 0.1 %/hr (stomatal closure suspected)",
+      label: `Phase 3 plateau: V_dry < ${vDryStagnation} %/hr (stomatal closure suspected)`,
       met: phase3Plateau,
-      value: piecewise.vDry !== null ? `${piecewise.vDry.toFixed(3)} %/hr` : "Not in Phase 3",
+      value: `${piecewise.vDry.toFixed(3)} %/hr`,
     });
   }
 
@@ -232,9 +253,10 @@ export function evalDehydrationWarning(
 
 export function evalGrowthOptimization(
   dliHistory: DLIDataPoint[],
-  drainageData: DrainageInput[],
   vpdHistory: VPDDataPoint[],
   plantType: string | null,
+  drainResult: DrainageResult,
+  piecewise?: PiecewiseDrainageResult | null
 ): ThreatResult {
   // Latest DLI (today or most recent day)
   const latestDLI = dliHistory.length > 0
@@ -259,14 +281,33 @@ export function evalGrowthOptimization(
   const dliTooLow  = latestDLI !== null && latestDLI < minDli;
   const dliTooHigh = latestDLI !== null && latestDLI > maxDli;
 
-  const drainResult = analyzeDrainage(drainageData, plantType);
-  let drainGood = drainResult.drainClass === "rapid" || drainResult.drainClass === "moderate";
+  let drainGood = false;
+  let drainLabel = "30-day soil structure optimal (not stagnant)";
+  let drainValue = "Monitoring...";
 
   const isSucculent = plantType === "succulent" || plantType === "cactus";
   const isOptimalDry = isSucculent && (drainResult.category === "no-event" || (drainResult.currentMoisture !== null && drainResult.currentMoisture < 30));
 
   if (isOptimalDry) {
     drainGood = true;
+    drainLabel = "30-day soil structure optimal or in dry phase";
+    drainValue = `Optimal dry state (${drainResult.currentMoisture?.toFixed(0) ?? 0}%)`;
+  } else if (piecewise && piecewise.drainClass !== "unknown") {
+    drainGood = piecewise.drainClass === "rapid" || piecewise.drainClass === "moderate";
+    drainLabel = isSucculent ? "30-day soil structure optimal or in dry phase" : "30-day soil structure optimal (not stagnant)";
+    drainValue = piecewise.drainClass === "rapid" ? "Rapid drainage (30-day avg)" : 
+                 piecewise.drainClass === "moderate" ? "Moderate drainage (30-day avg)" :
+                 "Stagnant drainage (30-day avg)";
+  } else {
+    drainGood = drainResult.drainClass === "rapid" || drainResult.drainClass === "moderate";
+    drainLabel = isSucculent ? "Soil properly draining or in optimal dry phase" : "Soil draining properly (not stagnant)";
+    if (drainResult.retentionHours !== null) {
+      drainValue = `${drainResult.retentionHours.toFixed(1)}h retention`;
+    } else if (drainResult.category === "no-event") {
+      drainValue = "No watering event detected";
+    } else {
+      drainValue = "Still retaining — monitoring";
+    }
   }
 
   const vpd7d = recentVpdAvg(vpdHistory, 7 * 24);
@@ -295,15 +336,9 @@ export function evalGrowthOptimization(
           : "No DLI data yet",
       },
       {
-        label: isSucculent ? "Soil properly draining or in optimal dry phase" : "Soil draining properly (not stagnant)",
+        label: drainLabel,
         met:   drainGood,
-        value: isOptimalDry
-          ? `Optimal dry state (${drainResult.currentMoisture?.toFixed(0) ?? 0}%)`
-          : drainResult.retentionHours !== null
-          ? `${drainResult.retentionHours.toFixed(1)}h retention`
-          : drainResult.category === "no-event"
-          ? "No watering event detected"
-          : "Still retaining — monitoring",
+        value: drainValue,
       },
       {
         label: "VPD in stable zone (0.8–1.2 kPa)",
@@ -326,10 +361,10 @@ export function evalNightLightWarning(
 
   if (plantType === "succulent") {
     // CAM plants require strict dark periods for nocturnal CO2 assimilation.
-    // Even 2–8 lux triggers phytochrome/cryptochrome photoreceptors,
+    // Even 2 lux of artificial light triggers phytochrome and cryptochrome photoreceptors,
     // causing immediate stomatal closure.
-    luxThreshold = 8; 
-    atRiskThreshold = 2;
+    luxThreshold = 2; 
+    atRiskThreshold = 0.5;
   } else if (plantType === "carnivorous") {
     luxThreshold = 30;
     atRiskThreshold = 10;
@@ -538,6 +573,7 @@ export function ThreatAlertsPanel({
   placementType,
   plantType,
   piecewise,
+  drainageResult,
 }: {
   drainageData:   DrainageInput[];
   vpdHistory30:   VPDDataPoint[];
@@ -547,17 +583,20 @@ export function ThreatAlertsPanel({
   placementType?: string | null;
   plantType?:     string | null;
   piecewise?:     PiecewiseDrainageResult | null;
+  drainageResult: DrainageResult;
 }) {
   const isPot = placementType === "pot";
   const rot          = evalRotWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null, piecewise);
   const dehydration  = evalDehydrationWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null, piecewise);
-  const growth       = evalGrowthOptimization(dliHistory, drainageData, vpdHistory30, plantType || null);
+  const growth       = evalGrowthOptimization(dliHistory, vpdHistory30, plantType || null, drainageResult, piecewise);
   const lightPol     = evalNightLightWarning(logs, plantType || null);
 
   const hasActive  = rot.status === "active"    || dehydration.status === "active" || lightPol.status === "active";
   const hasAtRisk  = rot.status === "at-risk"   || dehydration.status === "at-risk" || lightPol.status === "at-risk";
 
   const isOptimal  = growth.status === "active";
+
+  const [showInfo, setShowInfo] = useState(false);
 
   return (
     <div id="sitter-mode" className="scroll-mt-32 rounded-3xl border border-zinc-700/60 bg-zinc-900/40 backdrop-blur-xl shadow-2xl overflow-hidden">
@@ -578,7 +617,16 @@ export function ThreatAlertsPanel({
             }`} />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-white">Sitter Mode · Active Threat Monitor</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-semibold text-white">Sitter Mode · Active Threat Monitor</h3>
+              <button 
+                onClick={() => setShowInfo(!showInfo)} 
+                className="p-1 rounded-full hover:bg-zinc-800 text-zinc-400 transition-colors"
+                title="How does Sitter Mode work?"
+              >
+                <Info className="w-4 h-4" />
+              </button>
+            </div>
             <p className="text-xs text-zinc-500 mt-0.5">Real-time ecological threat status</p>
           </div>
         </div>
@@ -597,6 +645,71 @@ export function ThreatAlertsPanel({
             : "bg-zinc-500"
           }`} />
           {hasActive ? "THREAT DETECTED" : hasAtRisk ? "AT RISK" : isOptimal ? "ALL OPTIMAL" : "MONITORING"}
+        </div>
+      </div>
+
+      {/* Info Card Panel */}
+      <div 
+        className={`overflow-hidden transition-all duration-300 ease-in-out border-b border-zinc-800 ${
+          showInfo ? "max-h-[800px] opacity-100" : "max-h-0 opacity-0 border-transparent"
+        }`}
+      >
+        <div className="px-6 py-6 bg-zinc-900/80 text-sm">
+          <div className="flex justify-between items-start mb-5">
+            <h4 className="font-semibold text-white flex items-center gap-2 text-base">
+              <Info className="w-5 h-5 text-blue-400" />
+              Understanding Sitter Mode
+            </h4>
+            <button onClick={() => setShowInfo(false)} className="text-zinc-500 hover:text-white p-1 bg-zinc-800/50 hover:bg-zinc-700 rounded-full transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          
+          <div className="space-y-5">
+            <div>
+              <p className="text-zinc-300 mb-3 font-medium text-sm">Status Severities</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                  <div className="flex items-center gap-2 mb-1.5 text-emerald-400 font-bold text-[11px] tracking-wider"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> OPTIMAL / CLEAR</div>
+                  <p className="text-xs text-zinc-400 leading-relaxed">The best possible state. The environment is perfectly aligned with the plant&apos;s biological needs.</p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-orange-500/10 border border-orange-500/20">
+                  <div className="flex items-center gap-2 mb-1.5 text-orange-400 font-bold text-[11px] tracking-wider"><span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span> AT RISK / PARTIAL</div>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Not ideal. Some thresholds are outside the safe zone. An early warning to monitor conditions closely.</p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/20">
+                  <div className="flex items-center gap-2 mb-1.5 text-red-400 font-bold text-[11px] tracking-wider"><span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span> ACTIVE THREAT</div>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Very bad. Critical thresholds breached. Immediate action is required to prevent rot or severe stress.</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="space-y-3 mt-4 pt-5 border-t border-zinc-800/60">
+              <p className="text-zinc-300 font-medium text-sm">How Threats are Calculated</p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="bg-zinc-800/40 p-3.5 rounded-xl border border-zinc-700/50">
+                  <h5 className="text-xs font-bold text-white mb-1.5 flex items-center gap-2"><Droplets className="w-4 h-4 text-blue-400"/> Root Rot</h5>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Calculated by measuring structural soil stagnation (Phase 1/2 failure or &gt;75-85% prolonged moisture) combined with stagnant air (VPD &lt; 0.4 kPa). Both must occur to trigger a warning.</p>
+                </div>
+                
+                <div className="bg-zinc-800/40 p-3.5 rounded-xl border border-zinc-700/50">
+                  <h5 className="text-xs font-bold text-white mb-1.5 flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-orange-400"/> Dehydration</h5>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Calculated when soil is critically dry (&lt;10-20%) OR the plant stomata close (Phase 3 plateau &lt; 0.1 %/hr), combined with high atmospheric drought (VPD &gt; 1.6 kPa).</p>
+                </div>
+                
+                <div className="bg-zinc-800/40 p-3.5 rounded-xl border border-zinc-700/50">
+                  <h5 className="text-xs font-bold text-white mb-1.5 flex items-center gap-2"><Moon className="w-4 h-4 text-indigo-400"/> Light Pollution</h5>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Calculated by detecting sustained artificial light (&gt;30 mins) during the night cycle (21:00-06:00). Different plants tolerate different lux levels before circadian rhythm breaks.</p>
+                </div>
+                
+                <div className="bg-zinc-800/40 p-3.5 rounded-xl border border-zinc-700/50">
+                  <h5 className="text-xs font-bold text-white mb-1.5 flex items-center gap-2"><Zap className="w-4 h-4 text-emerald-400"/> Growth Optimization</h5>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Calculates if the "holy trinity" is perfectly aligned for vegetative growth: Ideal DLI range + well-oxygenated rapid drainage + stable VPD (0.8-1.2 kPa).</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

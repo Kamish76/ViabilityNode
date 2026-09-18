@@ -1,6 +1,6 @@
 # Soil Water Dynamics — Observed Retention Analysis
 
-> Complete technical documentation for [`DrainageCard.tsx`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/DrainageCard.tsx) and its companion library [`piecewiseDrainage.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/piecewiseDrainage.ts)
+> Complete technical documentation for [`DrainageCard.tsx`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/DrainageCard.tsx), the core analytical engine [`drainageAnalysis.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/drainageAnalysis.ts), its companion library [`piecewiseDrainage.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/piecewiseDrainage.ts), and the shared utility module [`sensorUtils.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/sensorUtils.ts).
 
 ---
 
@@ -12,10 +12,11 @@ It does this through two complementary analysis engines:
 
 | Engine | Function | Location |
 |--------|----------|----------|
-| **`analyzeDrainage()`** | Retention-based classification — measures total hours from peak to a 10% drop | [`DrainageCard.tsx:135–398`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/DrainageCard.tsx#L135-L398) |
-| **`analyzePiecewiseDrainage()`** | Three-phase biophysical model — splits the drainage curve into gravitational, field-capacity, and capillary/ET segments | [`piecewiseDrainage.ts:359–440`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/piecewiseDrainage.ts#L359-L440) |
+| **`analyzeDrainage()`** | Retention-based classification — measures total hours from peak to a 10% drop | [`drainageAnalysis.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/drainageAnalysis.ts) |
+| **`analyzePiecewiseDrainage()`** | Three-phase biophysical model — splits the drainage curve into gravitational, field-capacity, and capillary/ET segments | [`piecewiseDrainage.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/piecewiseDrainage.ts) |
+| **`sensorUtils.ts`** | Centralized filtering (median filter) and watering event detection used by both engines | [`sensorUtils.ts`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/sensorUtils.ts) |
 
-Both engines consume the same input data and are invoked in parallel inside the card's render function.
+Both analysis engines consume the same input data. The heavy calculations are orchestrated centrally in `DashboardClient.tsx`, which then passes the `DrainageResult` and `PiecewiseDrainageResult` down to the UI components (like `DrainageCard` and `ThreatAlertsPanel`) to prevent redundant processing.
 
 ---
 
@@ -23,23 +24,22 @@ Both engines consume the same input data and are invoked in parallel inside the 
 
 ```mermaid
 graph TD
-    A["Raw Sensor Readings<br/>(recorded_at, moisture_pct, raw)"] --> B["DrainageCard Component"]
+    A["Raw Sensor Readings<br/>(recorded_at, moisture_pct, raw)"] --> B["DashboardClient Orchestrator"]
     B --> C["analyzeDrainage()"]
     B --> D["analyzePiecewiseDrainage()"]
-    B --> E["getRecentRawData()"]
     C --> F["DrainageResult<br/>(category, retentionHours, etc.)"]
     D --> G["PiecewiseDrainageResult<br/>(vGrav, vDry, phases)"]
-    E --> H["Recharts AreaChart<br/>(5-day thinned data)"]
-    F --> I["Card UI: Header, Hero, Stats"]
-    G --> J["Card UI: Phase Bar, Velocities"]
-    F --> K["Downstream: MicroclimatProfileCard<br/>(via drainClass mapping)"]
+    F --> I["DrainageCard Component"]
+    G --> I
+    I --> H["Recharts AreaChart<br/>(5-day thinned data)"]
+    F --> K["Downstream: ThreatAlertsPanel &<br/>MicroclimatProfileCard"]
 ```
 
 ---
 
 ## 3. Input Contract
 
-### [`DrainageInput`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/DrainageCard.tsx#L32-L36)
+### [`DrainageInput`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/drainageAnalysis.ts)
 
 ```typescript
 interface DrainageInput {
@@ -56,11 +56,11 @@ interface DrainageInput {
 | `raw` | Raw ADC integer from the hardware sensor. |
 
 ### Calibration Pipeline
-Before ingestion, the raw ADC counts are transformed into `moisture_pct` using the hardware calibration constants (`Dry=1910` / `Wet=1100`):
+Before ingestion, the raw ADC counts are transformed into `moisture_pct` using the hardware calibration constants (`Dry=1920` / `Wet=880`). Setting the dry ceiling at 1920 (above the typical 1916 open-air spike) is a critical guard against the UI rendering negative moisture percentages:
 
 $$ \text{moisture\_pct} = \left( \frac{\text{ADC}_{\text{dry}} - \text{ADC}_{\text{raw}}}{\text{ADC}_{\text{dry}} - \text{ADC}_{\text{wet}}} \right) \times 100 $$
 
-Documenting this calibration transformation ensures component inputs align with raw micro-controller payloads.
+This logic is centralized in `src/lib/sensorUtils.ts` via the `calculateMoisturePct` function. Documenting this calibration transformation ensures component inputs align with raw micro-controller payloads.
 
 > [!IMPORTANT]
 > The module requires **at least 6 readings** and **at least 2 readings within the last 5 days** to produce any result other than `"insufficient"`.
@@ -83,6 +83,8 @@ Documenting this calibration transformation ensures component inputs align with 
 ---
 
 ## 5. Engine 1: `analyzeDrainage()` — Retention Classification
+
+This engine resides in `src/lib/drainageAnalysis.ts`.
 
 ### 5.1 Processing Pipeline
 
@@ -151,7 +153,7 @@ The algorithm scans forward through post-peak readings:
 | **`no-event`** | No watering events detected in 5 days | null | `"unknown"` |
 | **`insufficient`** | < 6 readings or < 2 in 5-day window | null | `"unknown"` |
 
-### 5.3 Output: [`DrainageResult`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/DrainageCard.tsx#L48-L73)
+### 5.3 Output: [`DrainageResult`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/drainageAnalysis.ts)
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -227,7 +229,7 @@ V_dry = (50% − 30%) / (t_30% − t_50%)   [%/hr]
 ```
 Measures the slower capillary/ET-driven drying once gravitational drainage is exhausted. **Only computed when soil crosses both 50% and 30%.**
 
-Cross-referencing atmospheric drying power (`vpd_kpa`) allows distinguishing between stagnant soil drainage vs. low ambient evaporation demand (optimal range 0.4–1.6 kPa). Optional `vpd_kpa` and DLI light values validate capillary drying rates against atmospheric demand.
+Cross-referencing atmospheric drying power (`vpd_kpa`) allows distinguishing between stagnant soil drainage vs. low ambient evaporation demand (optimal range 0.4–1.6 kPa). Additionally, the system incorporates the impact of Botanical Light Pollution (Artificial Light at Night/ALAN). Research by Ian Ashdown (2016) indicates that red (660nm) and far-red (730nm) light from modern LEDs can interfere with the phytochrome switch (P_r to P_{fr} isoforms), keeping stomata open or closed unnaturally. This interference can skew the calculated V_dry and signal false transpiration demand.
 
 Interpretation:
 | V<sub>dry</sub> | Visual Color | Meaning |
@@ -261,11 +263,17 @@ This indicates **anoxia risk** — the soil's macropores are not draining, which
 | `phase1Failure` | `boolean` | True if macropore failure detected |
 | `hoursAbove70` | `number \| null` | Continuous hours above 70% (null if not in Phase 1) |
 | `vpd_kpa` | `number \| null` | Optional environmental input to correlate with capillary drying rate |
-| `drainClass` | `"rapid" \| "moderate" \| "stagnant" \| "unknown"` | Backward-compatible classification |
+| `alan_interference` | `boolean` | True if Botanical Light Pollution (ALAN) is detected |
+| `drainClass` | `"rapid" \| "moderate" \| "stagnant" \| "unknown"` | Backward-compatible classification (Current event) |
 | `retentionHours` | `number \| null` | Backward-compat: same as analyzeDrainage's retention |
 | `wateringEvents` | `number` | Count of detected events |
 | `lastWateringAt` | `string \| null` | ISO timestamp of most recent peak |
 | `peakMoisture` | `number \| null` | Peak moisture after last watering |
+| `isHistoricalRate` | `boolean` | True if the exported classification comes from a cached event |
+| `historicalDrainClass` | `"rapid" \| "moderate" \| "stagnant" \| "unknown"` | Legacy cached classification |
+| `cachedVGrav` | `number \| null` | Cached historical Phase 1/2 clearance rate |
+| `cachedVDry` | `number \| null` | Cached historical Phase 3 drying rate |
+| `cachedDrainClass` | `"rapid" \| "moderate" \| "stagnant" \| "unknown"` | Cached historical classification |
 
 ---
 
@@ -312,10 +320,19 @@ Key behaviors:
 ### 8.1 Component Hierarchy
 
 ```
-DrainageCard (main export)
+DrainageCard & MicroclimatProfileCard
 ├── Header (category badge, icon, title "Soil Water Dynamics")
 ├── Hero: Retention Time (big number or status text)
 ├── Stats Row
+│   ├── Total Cycle Time
+│   ├── Minimum Moisture (Baseline)
+│   └── Max Saturation (Peak)
+├── Historical Aggregates (MicroclimatProfileCard)
+│   ├── [ 7D | 30D ] Time Window Selector
+│   ├── Phase 1 (Gravitational) Average Rate
+│   ├── Phase 2 (Transit) Average Duration
+│   └── Phase 3 (Capillary ET) Average Rate
+```
 │   ├── 24h Change (netChange24h with trend icon)
 │   └── Watering Events (count in 5-day window)
 ├── PhaseIndicatorBar (3-phase progress bar)
@@ -414,28 +431,36 @@ The `drainClass` field (backward-compatible mapping of `"rapid" | "moderate" | "
 
 ### ThreatAlertsPanel & Sitter Mode
 
-The [`ThreatAlertsPanel`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/ThreatAlertsPanel.tsx) and the **Sitter Mode** interface explicitly map output fields from `piecewiseDrainage.ts` to active threat monitors:
+The [`ThreatAlertsPanel`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/ThreatAlertsPanel.tsx) and the **Sitter Mode** interface receive the pre-calculated `drainageResult` from the dashboard and explicitly map output fields to active threat monitors:
 
 - **Rot Warning (Hypoxic / Macropore Failure)**: Triggered when `phase1Failure === true` and `hoursAbove70 > 24` combined with low $V_{\text{grav}}$.
 - **Dehydration Warning**: Triggered by Phase 3 saturation loss, driven by low moisture coupled with high $V_{\text{dry}}$ and extreme `vpd_kpa` values.
 
 ### drainClass Mapping Priority
 
-The piecewise engine uses this fallback chain for backward-compat:
+The piecewise engine evaluates drainage properties based on the **peak phase** reached during the watering event, ensuring light showers aren't unfairly classified as stagnant:
 
 ```
-1. V_grav available?
-   → > 3.0 %/hr     → "rapid"
-   → 0.8–3.0 %/hr   → "moderate"
-   → < 0.8 %/hr     → "stagnant"
+1. Peak ≥ 50% (Phase 1 / 2) -> Judged by V_grav or retention time
+   → V_grav available?
+      → > 3.0 %/hr     → "rapid"
+      → 0.8–3.0 %/hr   → "moderate"
+      → < 0.8 %/hr     → "stagnant"
+   → Else, retentionHours available?
+      → < 6h           → "rapid"
+      → 6–48h          → "moderate"
+      → > 48h          → "stagnant"
+   → Neither available → "unknown"
 
-2. retentionHours available?
-   → < 6h           → "rapid"
-   → 6–48h          → "moderate"
-   → > 48h          → "stagnant"
-
-3. Neither available  → "unknown"
+2. Peak < 50% (Phase 3) -> Judged purely by Capillary / ET rate
+   → V_dry available?
+      → > 0.5 %/hr     → "rapid" (Active ET)
+      → ≥ 0.1 %/hr     → "moderate" (Normal Dry)
+      → < 0.1 %/hr     → "stagnant" (Very Slow)
+   → Else             → "unknown"
 ```
+
+If the result is `"unknown"`, the system triggers the **Historical Caching Fallback**, iterating backward through up to 30 days of data to find the most recent completed watering event and exporting its class to `cachedDrainClass`.
 
 ---
 
@@ -490,16 +515,30 @@ Time     Moisture%    What happens
 |------------|-------|
 | `lucide-react` | Icons: Waves, Droplets, TrendingDown/Up, AlertTriangle, Clock, ArrowRight, Gauge, Wind |
 | `recharts` | AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine |
-| `@/lib/piecewiseDrainage` | `analyzePiecewiseDrainage()`, `PiecewiseDrainageResult`, `PHASE_1_BOUNDARY`, `PHASE_3_BOUNDARY` |
+| `@/lib/drainageAnalysis` | `analyzeDrainage()`, `DrainageResult`, `DrainageInput`, `DrainCategory` |
+| `@/lib/piecewiseDrainage` | `analyzePiecewiseDrainage()`, `PiecewiseDrainageResult` |
+| `@/lib/sensorUtils` | `medianFilter()`, `detectWateringEvents()` |
 
 ---
 
-## 14. Exports Summary
+## 14. Literature References
 
-| Export | Type | Description |
-|--------|------|-------------|
-| `DrainageInput` | interface | Input data shape |
-| `DrainCategory` | type | 7-value union type for classification |
-| `DrainageResult` | interface | Full output from `analyzeDrainage()` |
-| `analyzeDrainage()` | function | Retention-based analysis engine |
-| `DrainageCard` | React component | Main UI component |
+- **Cornell University CALS (NRCCA)**: Competency Area 2: Soil Hydrology. Basis for Field Capacity and Available Water Capacity thresholds.
+- **FAO (Food and Agriculture Organization)**: Field Measurements and Infiltration functions based on the Kostiakov-Lewis relationships.
+- **AHDB**: Standards for rootzone management, containerized crop drainage, and anoxia prevention.
+- **Ian Ashdown (2016)**: *Botanical Light Pollution*. Details the impact of spectral power distribution on the phytochrome switch.
+- **Correa-Cano et al. (2018)**: *Erosion of natural darkness in the geographic ranges of cacti*.
+
+---
+
+## 15. Exports Summary
+
+| Export | Location | Description |
+|--------|----------|-------------|
+| `DrainageInput` | `drainageAnalysis.ts` | Input data shape |
+| `DrainCategory` | `drainageAnalysis.ts` | 7-value union type for classification |
+| `DrainageResult` | `drainageAnalysis.ts` | Full output from `analyzeDrainage()` |
+| `analyzeDrainage()` | `drainageAnalysis.ts` | Retention-based analysis engine |
+| `medianFilter()` | `sensorUtils.ts` | Signal de-noising |
+| `detectWateringEvents()`| `sensorUtils.ts` | Spikes / Event peak detection |
+| `DrainageCard` | `DrainageCard.tsx` | Main UI presentation component |

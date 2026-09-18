@@ -5,9 +5,9 @@ import { LayoutDashboard, Activity, FlaskConical, LineChart, ListTree, ShieldAle
 
 const navItems = [
   { id: "summary", label: "Summary", icon: LayoutDashboard },
+  { id: "live-metrics", label: "Live Metrics", icon: Activity },
   { id: "sitter-mode", label: "Sitter Mode", icon: ShieldAlert },
   { id: "trial-progress", label: "Trial Progress", icon: FlaskConical },
-  { id: "live-metrics", label: "Live Metrics", icon: Activity },
   { id: "analytics", label: "Analytics", icon: LineChart },
   { id: "live-logs", label: "Logs", icon: ListTree },
 ];

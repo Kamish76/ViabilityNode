@@ -22,7 +22,7 @@ import { createClient } from "@/utils/supabase/client";
 import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
 import { VPDChart, type VPDDataPoint } from "./components/VPDChart";
 import { AtmosphericCorrelationChart } from "./components/AtmosphericCorrelationChart";
-import { DrainageCard, type DrainageInput } from "./components/DrainageCard";
+import { DrainageCard } from "./components/DrainageCard";
 import { MicroclimatProfileCard, type PrecalculatedProfile } from "./components/MicroclimatProfileCard";
 import {
   ThreatAlertsPanel,
@@ -35,6 +35,8 @@ import { DeploymentPanel, type Deployment } from "./components/DeploymentPanel";
 import { TrialProgressCard } from "./components/TrialProgressCard";
 import { SideNav } from "./components/SideNav";
 import { SummaryDashboard, type DailySummaryData } from "./components/SummaryDashboard";
+import { calculateMoisturePct } from "@/lib/sensorUtils";
+import { analyzeDrainage, type DrainageInput, type DrainageResult } from "@/lib/drainageAnalysis";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,10 +59,7 @@ export interface BatterySnapshot {
   battery_pct: number;
 }
 
-const HARDCODED_CALIBRATION = {
-  dryLimit: 1920,
-  wetLimit: 880,
-};
+
 
 
 // ─── Calculations ─────────────────────────────────────────────────────────────
@@ -84,12 +83,7 @@ function calculateVPD(tempC: number, humidityRH: number, lux: number = 0): numbe
   return Math.max(0, eSatLeaf - eActAir);
 }
 
-function calculateMoisturePct(rawADC: number): number {
-  const { dryLimit, wetLimit } = HARDCODED_CALIBRATION;
-  if (dryLimit === wetLimit) return 0;
-  const pct = ((dryLimit - rawADC) / (dryLimit - wetLimit)) * 100;
-  return Math.max(0, Math.min(100, pct));
-}
+
 
 /**
  * Estimate days of battery remaining using a 7-day rolling drop rate.
@@ -129,13 +123,13 @@ function estimateBatteryDays(
         // A recharge or battery swap happened! The battery percentage went UP significantly between `pt` and `prevPt`.
         const chronologicalCycle = [...currentCycle].reverse();
         const cycleDays = (new Date(chronologicalCycle[chronologicalCycle.length - 1].recorded_at).getTime() - new Date(chronologicalCycle[0].recorded_at).getTime()) / (1000 * 60 * 60 * 24);
-        
+
         // If this post-recharge cycle is long enough (> 12 hours) and has a valid drop, we use it!
         if (cycleDays >= 0.5 && chronologicalCycle[0].battery_pct - chronologicalCycle[chronologicalCycle.length - 1].battery_pct > 0) {
           bestCycle = chronologicalCycle;
           break;
         }
-        
+
         // Otherwise, it's too short to get a good rate, so we skip it and look at the PREVIOUS cycle.
         currentCycle = [pt];
       }
@@ -213,7 +207,12 @@ export function DashboardClient({
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
   const [currentDeployment, setCurrentDeployment] = useState<Deployment | null>(initialActiveDeployment);
   const [allDeployments, setAllDeployments] = useState<Deployment[]>(initialDeploymentHistory);
+  const [mounted, setMounted] = useState(false);
   const supabase = createClient();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Real-time subscription
   useEffect(() => {
@@ -294,9 +293,9 @@ export function DashboardClient({
   const historicalVpd = vpdHistory7.filter(d => new Date(d.recorded_at).getTime() < endOfYesterdayMs);
   const historicalDli = dliHistory.filter(d => new Date(d.day).getTime() < endOfYesterdayMs);
   const historicalLogs = logs.filter(l => new Date(l.recorded_at).getTime() < endOfYesterdayMs);
-  
-  const historicalLatestMoisture = historicalDrainageData.length > 0 
-    ? historicalDrainageData[historicalDrainageData.length - 1].moisture_pct 
+
+  const historicalLatestMoisture = historicalDrainageData.length > 0
+    ? historicalDrainageData[historicalDrainageData.length - 1].moisture_pct
     : null;
 
   // Phase 4.5: Piecewise segmented drainage analysis
@@ -305,9 +304,10 @@ export function DashboardClient({
   // Calculate overall viability status
   const currentPlantType = currentDeployment?.plant_type || null;
   const isPot = placementType === "pot";
+  const drainageResult = analyzeDrainage(historicalDrainageData, currentPlantType);
   const rot = evalRotWarning(historicalDrainageData, historicalVpd, historicalLatestMoisture, isPot, currentPlantType, piecewiseResult);
   const dehy = evalDehydrationWarning(historicalDrainageData, historicalVpd, historicalLatestMoisture, isPot, currentPlantType, piecewiseResult);
-  const growth = evalGrowthOptimization(historicalDli, historicalDrainageData, historicalVpd, currentPlantType);
+  const growth = evalGrowthOptimization(historicalDli, historicalVpd, currentPlantType, drainageResult);
 
   const hasActiveThreat = rot.status === "active" || dehy.status === "active";
   const hasRisk = rot.status === "at-risk" || dehy.status === "at-risk";
@@ -351,7 +351,7 @@ export function DashboardClient({
                 <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900/50 border border-zinc-800 rounded-full backdrop-blur-md">
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
                   <span className="text-sm font-medium text-zinc-300">
-                    {formatDistanceToNow(new Date(latest.recorded_at), { addSuffix: true })}
+                    {mounted ? formatDistanceToNow(new Date(latest.recorded_at), { addSuffix: true }) : "..."}
                   </span>
                 </div>
               )}
@@ -378,6 +378,79 @@ export function DashboardClient({
                   piecewiseResult={piecewiseResult}
                 />
 
+                {/* Metrics Grid */}
+                <div id="live-metrics" className="scroll-mt-32 space-y-6">
+                  <div className="flex items-center gap-3 pt-2">
+                    <div className="h-px flex-1 bg-zinc-800" />
+                    <span className="text-xs font-medium text-zinc-500 uppercase tracking-widest px-3">
+                      Live Metrics
+                    </span>
+                    <div className="h-px flex-1 bg-zinc-800" />
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-4 md:gap-6">
+
+                    <MetricCard
+                      title="Temperature"
+                      value={`${latest.temperature_c.toFixed(1)}°C`}
+                      icon={<Thermometer className="w-5 h-5 text-orange-400" />}
+                      trend={null}
+                    />
+
+                    <MetricCard
+                      title="Humidity"
+                      value={`${latest.humidity_rh.toFixed(1)}%`}
+                      icon={<Droplets className="w-5 h-5 text-blue-400" />}
+                      trend={null}
+                    />
+
+                    <MetricCard
+                      title="VPD"
+                      value={latest.vpd_kpa ? `${latest.vpd_kpa.toFixed(2)} kPa` : "N/A"}
+                      subtitle={dailySummary.previous?.vpd != null ? `Prev Day Avg: ${dailySummary.previous.vpd.toFixed(2)} kPa` : undefined}
+                      icon={<Wind className="w-5 h-5 text-teal-400" />}
+                      trend={null}
+                    />
+
+                    {/* ── Phase 1.1: Calibrated Soil Moisture ── */}
+                    <MetricCard
+                      title="Soil Moisture"
+                      value={moisturePct !== null ? `${moisturePct.toFixed(1)}%` : "—"}
+                      subtitle={`Raw ADC: ${latest.soil_moisture_raw}`}
+                      icon={<Droplets className="w-5 h-5 text-emerald-400" />}
+                      trend={null}
+                      accentColor="emerald"
+                      barValue={moisturePct ?? 0}
+                    />
+
+                    <MetricCard
+                      title="Illuminance"
+                      value={`${latest.illuminance_lux} lx`}
+                      icon={<Sun className="w-5 h-5 text-yellow-400" />}
+                      trend={null}
+                    />
+
+                    {/* ── Phase 1.2: Battery Autonomy ── */}
+                    <BatteryCard
+                      pct={latest.battery_pct}
+                      voltage={latest.battery_v}
+                      daysRemaining={daysRemaining}
+                      warning={batteryWarning}
+                    />
+
+                  </div>
+                </div>
+
+                {/* Deployment Panel */}
+                {latest && (
+                  <DeploymentPanel
+                    activeDeployment={currentDeployment}
+                    deploymentHistory={allDeployments}
+                    deviceId={latest.device_id}
+                    onDeploymentCreated={handleDeploymentCreated}
+                    onDeploymentUpdated={handleDeploymentUpdated}
+                  />
+                )}
+
                 {/* Sitter Mode: Active Threat Alerts */}
                 <ThreatAlertsPanel
                   drainageData={historicalDrainageData}
@@ -388,6 +461,7 @@ export function DashboardClient({
                   placementType={placementType}
                   plantType={currentDeployment?.plant_type || null}
                   piecewise={piecewiseResult}
+                  drainageResult={drainageResult}
                 />
               </div>
 
@@ -400,17 +474,6 @@ export function DashboardClient({
                     remaining before BMS cutout. Consider recharging.
                   </p>
                 </div>
-              )}
-
-              {/* Deployment Panel */}
-              {latest && (
-                <DeploymentPanel
-                  activeDeployment={currentDeployment}
-                  deploymentHistory={allDeployments}
-                  deviceId={latest.device_id}
-                  onDeploymentCreated={handleDeploymentCreated}
-                  onDeploymentUpdated={handleDeploymentUpdated}
-                />
               )}
 
               {/* Trial Progress Card */}
@@ -426,61 +489,6 @@ export function DashboardClient({
                   />
                 </div>
               )}
-
-              {/* Metrics Grid */}
-              <div id="live-metrics" className="scroll-mt-32">
-                <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-4 md:gap-6">
-
-                  <MetricCard
-                    title="Temperature"
-                    value={`${latest.temperature_c.toFixed(1)}°C`}
-                    icon={<Thermometer className="w-5 h-5 text-orange-400" />}
-                    trend={null}
-                  />
-
-                  <MetricCard
-                    title="Humidity"
-                    value={`${latest.humidity_rh.toFixed(1)}%`}
-                    icon={<Droplets className="w-5 h-5 text-blue-400" />}
-                    trend={null}
-                  />
-
-                  <MetricCard
-                    title="VPD"
-                    value={latest.vpd_kpa ? `${latest.vpd_kpa.toFixed(2)} kPa` : "N/A"}
-                    subtitle={dailySummary.previous?.vpd != null ? `Prev Day Avg: ${dailySummary.previous.vpd.toFixed(2)} kPa` : undefined}
-                    icon={<Wind className="w-5 h-5 text-teal-400" />}
-                    trend={null}
-                  />
-
-                  {/* ── Phase 1.1: Calibrated Soil Moisture ── */}
-                  <MetricCard
-                    title="Soil Moisture"
-                    value={moisturePct !== null ? `${moisturePct.toFixed(1)}%` : "—"}
-                    subtitle={`Raw ADC: ${latest.soil_moisture_raw}`}
-                    icon={<Droplets className="w-5 h-5 text-emerald-400" />}
-                    trend={null}
-                    accentColor="emerald"
-                    barValue={moisturePct ?? 0}
-                  />
-
-                  <MetricCard
-                    title="Illuminance"
-                    value={`${latest.illuminance_lux} lx`}
-                    icon={<Sun className="w-5 h-5 text-yellow-400" />}
-                    trend={null}
-                  />
-
-                  {/* ── Phase 1.2: Battery Autonomy ── */}
-                  <BatteryCard
-                    pct={latest.battery_pct}
-                    voltage={latest.battery_v}
-                    daysRemaining={daysRemaining}
-                    warning={batteryWarning}
-                  />
-
-                </div>
-              </div>
 
 
 
@@ -512,7 +520,7 @@ export function DashboardClient({
                   <VPDChart data={vpdHistory} rollingAvg={vpdRollingAvg} />
 
                   {/* 2.2 — Soil Drainage Velocity */}
-                  <DrainageCard data={drainageData} plantType={currentPlantType} />
+                  <DrainageCard data={drainageData} plantType={currentPlantType} precalculatedResult={analyzeDrainage(drainageData, currentPlantType)} precalculatedPiecewise={analyzePiecewiseDrainage(drainageData)} />
                 </div>
 
                 {/* 2.4 — Atmospheric Correlation */}
