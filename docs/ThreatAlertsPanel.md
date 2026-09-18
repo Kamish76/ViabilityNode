@@ -30,8 +30,10 @@ It evaluates four primary threat/optimization categories:
 Detects conditions leading to root-zone hypoxia (oxygen starvation). Root rot occurs when soil remains completely saturated, preventing air from re-entering the macropores, combined with low atmospheric demand (VPD) failing to pull water upward.
 
 **Triggers:**
-- **Primary Check:** Leverages `piecewise` data if available. Checks for Phase 1 gravitational clearance failure (`V_grav < 0.5 %/hr` or moisture sustained above 70% for too long).
-- **Fallback Check:** Uses standard deviation (`stdDev < flatThreshold`) on recent moisture history.
+- **Primary Check:** Leverages `piecewise` data if available. Checks for structurally stagnant drainage through either:
+  - **Phase 1 Failure (Macropore Stagnation):** Gravitational clearance fails (`V_grav < 0.5 %/hr`) or moisture sits above 70% for too long.
+  - **Phase 2 Failure (Mesopore Stagnation):** The transit time from 70% down to 50% moisture takes an excessively long time (> 96 hours), maintaining chronic sogginess.
+- **Fallback Check:** Uses standard deviation (`stdDev < flatThreshold`) on recent moisture history when piecewise data is unavailable.
 - **Atmospheric Check:** 48-hour average VPD must be critically low (`< 0.4 kPa`) indicating stagnant air.
 
 **Thresholds by Plant Type:**

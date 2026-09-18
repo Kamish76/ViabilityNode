@@ -78,18 +78,23 @@ export function evalRotWarning(
   const moisture = recentMoistureStats(drainageData, windowHours);
   const vpd48hAvg   = recentVpdAvg(vpdHistory, 48);
 
-  // ── Enhanced Phase 1 Failure detection (Report Section 5, Trigger 1) ──
-  // If piecewise data is available, use V_grav to detect macropore drainage failure.
-  // This replaces the blunt stdDev < flatThreshold check with a physically meaningful diagnostic.
+  // ── Enhanced Phase 1 & 2 Failure detection (Report Section 5) ──
+  // If piecewise data is available, use V_grav and transit times to detect macropore/mesopore stagnation.
   let highAndFlat: boolean;
+  let phase2Failed = false;
+  let phase1Failed = false;
 
   if (piecewise && piecewise.wateringEvents > 0) {
     // Phase 1 Failure: moisture is high AND gravitational clearance is inadequate
-    const phase1Failed = piecewise.phase1Failure ||
+    phase1Failed = piecewise.phase1Failure ||
       (piecewise.vGrav !== null && piecewise.vGrav < 0.5) ||
       (piecewise.hoursAbove70 !== null && piecewise.hoursAbove70 > windowHours);
     
-    highAndFlat = moisture !== null && moisture.avg >= satThreshold && phase1Failed;
+    // Phase 2 Failure: transit time from 70% to 50% takes >96h (mesopore stagnation)
+    phase2Failed = !!piecewise.phase2Failure;
+    
+    // Trigger if Phase 1 failed (while saturated) OR if Phase 2 transit failed (chronic sogginess)
+    highAndFlat = (moisture !== null && moisture.avg >= satThreshold && phase1Failed) || phase2Failed;
   } else {
     // Fallback: original stdDev-based flatness check when piecewise data unavailable
     highAndFlat =
@@ -106,15 +111,23 @@ export function evalRotWarning(
   const status: AlertStatus = active ? "active" : atRisk ? "at-risk" : "clear";
 
   // Condition labels — use piecewise terminology when available
-  const moistureConditionLabel = piecewise && piecewise.wateringEvents > 0
-    ? `Phase 1 gravitational clearance < 0.5 %/hr (macropore drainage failure, ${plantType || 'standard'})`
-    : `Soil ≥ ${satThreshold}% moisture, flat for ${windowHours}h (${plantType || 'standard'} adjusted)`;
+  const moistureConditionLabel = (() => {
+    if (piecewise && piecewise.wateringEvents > 0) {
+      if (phase2Failed) return `Phase 2 transit failure (>96h between 70%–50%) — mesopore stagnation`;
+      return `Phase 1 gravitational clearance < 0.5 %/hr (macropore failure, ${plantType || 'standard'})`;
+    }
+    return `Soil ≥ ${satThreshold}% moisture, flat for ${windowHours}h (${plantType || 'standard'} adjusted)`;
+  })();
 
   const moistureConditionValue = (() => {
     if (piecewise && piecewise.wateringEvents > 0) {
       const parts: string[] = [];
-      if (piecewise.vGrav !== null) parts.push(`V_grav: ${piecewise.vGrav.toFixed(2)} %/hr`);
-      if (piecewise.hoursAbove70 !== null) parts.push(`${piecewise.hoursAbove70.toFixed(1)}h above 70%`);
+      if (phase2Failed && piecewise.transit70to50Hours !== null) {
+        parts.push(`transit: ${piecewise.transit70to50Hours.toFixed(1)}h`);
+      } else {
+        if (piecewise.vGrav !== null) parts.push(`V_grav: ${piecewise.vGrav.toFixed(2)} %/hr`);
+        if (piecewise.hoursAbove70 !== null) parts.push(`${piecewise.hoursAbove70.toFixed(1)}h >70%`);
+      }
       if (moisture) parts.push(`avg ${moisture.avg.toFixed(1)}%`);
       return parts.length > 0 ? parts.join(' · ') : "Insufficient data";
     }
@@ -125,12 +138,12 @@ export function evalRotWarning(
     status,
     title: "Rot Warning",
     headline: active
-      ? "Soil saturated & air stagnant — root-zone hypoxia imminent"
+      ? "Soil structurally stagnant & air stagnant — root-zone hypoxia imminent"
       : atRisk
       ? "One of two rot conditions detected — monitor closely"
       : "No rot risk detected",
     detail: piecewise && piecewise.wateringEvents > 0
-      ? "Root rot triggers when Phase 1 gravitational drainage fails (macropores blocked, no oxygen replenishment) while chronically low VPD prevents the plant from transpiring water upward. Both conditions must persist simultaneously."
+      ? "Root rot triggers when either Phase 1 (macropore clearance) or Phase 2 (mesopore transit) structurally fails, cutting off root oxygen, while chronically low VPD prevents upward transpiration. Both soil stagnation and atmospheric stagnation must persist simultaneously."
       : "Root rot triggers when soil stays saturated (no oxygen replenishment) while chronically low VPD prevents the plant from transpiring water upward. Both conditions must persist simultaneously.",
     conditions: [
       {
