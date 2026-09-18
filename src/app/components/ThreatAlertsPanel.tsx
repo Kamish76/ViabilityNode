@@ -67,8 +67,8 @@ export function evalRotWarning(
   // Plant-specific adjustments
   if (plantType === "succulent") {
     // Succulents rot very easily, lower tolerance
-    satThreshold = isPot ? 60 : 70;
-    windowHours = 24; 
+    satThreshold = isPot ? 75 : 75;
+    windowHours = isPot ? 48 : 72; 
   } else if (plantType === "carnivorous") {
     // Carnivorous/bog plants naturally live in bogs, extremely high rot tolerance
     satThreshold = 95;
@@ -160,8 +160,8 @@ export function evalDehydrationWarning(
   let vpdDanger = 1.6; // Updated from 1.5 per Report Section 5
 
   if (plantType === "succulent") {
-    // Succulents thrive in dry conditions
-    dryThreshold = 5;
+    // Succulents thrive in dry conditions, but dropping below 10% risks tissue damage under high VPD
+    dryThreshold = 10;
     vpdDanger = 2.0;
   } else if (plantType === "carnivorous") {
     // Bog plants dry out extremely fast and die
@@ -176,10 +176,17 @@ export function evalDehydrationWarning(
   const highVPD = vpd7d !== null && vpd7d > vpdDanger;
 
   // ── Enhanced Phase 3 Plateau detection (Report Section 5, Trigger 2) ──
-  // If V_dry < 0.1 %/hr, the soil is in a capillary stagnation zone.
-  // The plant has likely stopped transpiring (stomatal closure) — a sign of
-  // drought stress even if moisture hasn't hit the absolute dry threshold.
-  const phase3Plateau = piecewise?.vDry !== null && piecewise?.vDry !== undefined && piecewise.vDry < 0.1;
+  // If V_dry drops below a critical threshold, the soil is in a capillary stagnation zone.
+  // The plant has likely stopped transpiring (stomatal closure) — a sign of drought stress.
+  const vDryStagnation = 0.1;
+  let phase3Plateau = false;
+
+  if (plantType !== "succulent") {
+    // CAM plants (succulents) naturally keep stomata closed during the day (near-zero V_dry).
+    // The Phase 3 plateau early warning does not apply to them.
+    phase3Plateau = piecewise?.vDry !== null && piecewise?.vDry !== undefined && piecewise.vDry < vDryStagnation;
+  }
+  
   const phase3StressDetected = phase3Plateau && highVPD;
 
   // Original trigger: dry soil + high VPD
@@ -202,12 +209,12 @@ export function evalDehydrationWarning(
     },
   ];
 
-  // Add Phase 3 plateau condition when piecewise data is available
-  if (piecewise && piecewise.wateringEvents > 0) {
+  // Add Phase 3 plateau condition when piecewise data is available and vDry is calculated
+  if (piecewise && piecewise.vDry !== null && plantType !== "succulent") {
     conditions.push({
-      label: "Phase 3 plateau: V_dry < 0.1 %/hr (stomatal closure suspected)",
+      label: `Phase 3 plateau: V_dry < ${vDryStagnation} %/hr (stomatal closure suspected)`,
       met: phase3Plateau,
-      value: piecewise.vDry !== null ? `${piecewise.vDry.toFixed(3)} %/hr` : "Not in Phase 3",
+      value: `${piecewise.vDry.toFixed(3)} %/hr`,
     });
   }
 
@@ -325,10 +332,10 @@ export function evalNightLightWarning(
 
   if (plantType === "succulent") {
     // CAM plants require strict dark periods for nocturnal CO2 assimilation.
-    // Even 2–8 lux triggers phytochrome/cryptochrome photoreceptors,
+    // Even 2 lux of artificial light triggers phytochrome and cryptochrome photoreceptors,
     // causing immediate stomatal closure.
-    luxThreshold = 8; 
-    atRiskThreshold = 2;
+    luxThreshold = 2; 
+    atRiskThreshold = 0.5;
   } else if (plantType === "carnivorous") {
     luxThreshold = 30;
     atRiskThreshold = 10;
