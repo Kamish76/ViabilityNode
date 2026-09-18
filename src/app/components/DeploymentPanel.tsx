@@ -3,7 +3,6 @@
 import { useState, useCallback } from "react";
 import {
   MapPin,
-  Plus,
   X,
   ChevronDown,
   ChevronUp,
@@ -402,12 +401,6 @@ export function DeploymentPanel({
   const [isEditing, setIsEditing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
-  const handleCreated = useCallback(
-    (d: Deployment) => {
-      onDeploymentCreated(d);
-    },
-    [onDeploymentCreated]
-  );
 
   const cfg = activeDeployment
     ? getPlacementConfig(activeDeployment.placement_type)

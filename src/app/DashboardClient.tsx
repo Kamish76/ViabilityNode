@@ -56,10 +56,6 @@ export interface BatterySnapshot {
   battery_pct: number;
 }
 
-// ─── Calibration defaults (prototype / debug values) ─────────────────────────
-
-const CALIBRATION_STORAGE_KEY = "viability_node_calibration";
-
 interface CalibrationConfig {
   dryLimit: number;   // ADC reading in air (≈ 1900)
   wetLimit: number;   // ADC reading fully submerged (≈ 1100)
@@ -70,24 +66,6 @@ const DEFAULT_CALIBRATION: CalibrationConfig = {
   wetLimit: 1000,   // Absolute wet (submerged in water reading)
 };
 
-function loadCalibration(): CalibrationConfig {
-  if (typeof window === "undefined") return DEFAULT_CALIBRATION;
-  try {
-    const raw = localStorage.getItem(CALIBRATION_STORAGE_KEY);
-    if (!raw) return DEFAULT_CALIBRATION;
-    const parsed = JSON.parse(raw);
-    return {
-      dryLimit: Number(parsed.dryLimit) || DEFAULT_CALIBRATION.dryLimit,
-      wetLimit: Number(parsed.wetLimit) || DEFAULT_CALIBRATION.wetLimit,
-    };
-  } catch {
-    return DEFAULT_CALIBRATION;
-  }
-}
-
-function saveCalibration(cfg: CalibrationConfig): void {
-  localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(cfg));
-}
 
 // ─── Calculations ─────────────────────────────────────────────────────────────
 
@@ -134,15 +112,58 @@ function estimateBatteryDays(
     (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
   );
 
-  const oldest = sorted[0];
-  const newest = sorted[sorted.length - 1];
-  const pctDrop = (oldest.battery_pct ?? 0) - (newest.battery_pct ?? 0);
-  const msElapsed =
-    new Date(newest.recorded_at).getTime() -
-    new Date(oldest.recorded_at).getTime();
+  // Add current live point for the most up-to-date calculation
+  const lastTime = new Date(sorted[sorted.length - 1].recorded_at).getTime();
+  if (Date.now() - lastTime > 1000 * 60 * 60) {
+    sorted.push({ recorded_at: new Date().toISOString(), battery_pct: currentPct });
+  }
+
+  let currentCycle: BatterySnapshot[] = [];
+  let bestCycle: BatterySnapshot[] = [];
+
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const pt = sorted[i];
+    if (currentCycle.length === 0) {
+      currentCycle.push(pt);
+    } else {
+      const prevPt = currentCycle[currentCycle.length - 1]; // chronologically newer point
+      // If the older point (pt) has a higher or roughly equal battery, it's part of the discharge cycle.
+      // We allow a small 2% margin for temperature fluctuations or ADC noise.
+      if (pt.battery_pct >= prevPt.battery_pct - 2) {
+        currentCycle.push(pt);
+      } else {
+        // A recharge or battery swap happened! The battery percentage went UP significantly between `pt` and `prevPt`.
+        const chronologicalCycle = [...currentCycle].reverse();
+        const cycleDays = (new Date(chronologicalCycle[chronologicalCycle.length - 1].recorded_at).getTime() - new Date(chronologicalCycle[0].recorded_at).getTime()) / (1000 * 60 * 60 * 24);
+        
+        // If this post-recharge cycle is long enough (> 12 hours) and has a valid drop, we use it!
+        if (cycleDays >= 0.5 && chronologicalCycle[0].battery_pct - chronologicalCycle[chronologicalCycle.length - 1].battery_pct > 0) {
+          bestCycle = chronologicalCycle;
+          break;
+        }
+        
+        // Otherwise, it's too short to get a good rate, so we skip it and look at the PREVIOUS cycle.
+        currentCycle = [pt];
+      }
+    }
+  }
+
+  if (bestCycle.length === 0) {
+    const chronologicalCycle = [...currentCycle].reverse();
+    if (chronologicalCycle.length >= 2) {
+      bestCycle = chronologicalCycle;
+    }
+  }
+
+  if (bestCycle.length < 2) return null;
+
+  const oldest = bestCycle[0];
+  const newest = bestCycle[bestCycle.length - 1];
+  const pctDrop = oldest.battery_pct - newest.battery_pct;
+  const msElapsed = new Date(newest.recorded_at).getTime() - new Date(oldest.recorded_at).getTime();
   const daysElapsed = msElapsed / (1000 * 60 * 60 * 24);
 
-  if (pctDrop <= 0 || daysElapsed <= 0) return null; // charging or no data
+  if (pctDrop <= 0 || daysElapsed <= 0) return null;
 
   const dropPerDay = pctDrop / daysElapsed;
   return currentPct / dropPerDay;
@@ -373,6 +394,7 @@ export function DashboardClient({
   activeDeployment: initialActiveDeployment,
   deploymentHistory: initialDeploymentHistory,
   dailySummary,
+  initialDeviceSettings,
 }: {
   initialLogs: TelemetryData[];
   batteryHistory: BatterySnapshot[];
@@ -384,18 +406,18 @@ export function DashboardClient({
   activeDeployment: Deployment | null;
   deploymentHistory: Deployment[];
   dailySummary: DailySummaryData;
+  initialDeviceSettings?: { dry_limit: number; wet_limit: number; plant_type?: string; placement_type?: string } | null;
 }) {
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
-  const [calibration, setCalibration] = useState<CalibrationConfig>(DEFAULT_CALIBRATION);
+  const [calibration, setCalibration] = useState<CalibrationConfig>(
+    initialDeviceSettings 
+      ? { dryLimit: initialDeviceSettings.dry_limit, wetLimit: initialDeviceSettings.wet_limit }
+      : DEFAULT_CALIBRATION
+  );
   const [showCalibration, setShowCalibration] = useState(false);
   const [currentDeployment, setCurrentDeployment] = useState<Deployment | null>(initialActiveDeployment);
   const [allDeployments, setAllDeployments] = useState<Deployment[]>(initialDeploymentHistory);
   const supabase = createClient();
-
-  // Load calibration from localStorage on mount (client-only)
-  useEffect(() => {
-    setCalibration(loadCalibration());
-  }, []);
 
   // Real-time subscription
   useEffect(() => {
@@ -419,12 +441,25 @@ export function DashboardClient({
     return () => { supabase.removeChannel(channel); };
   }, [supabase]);
 
-  const handleSaveCalibration = useCallback((cfg: CalibrationConfig) => {
-    setCalibration(cfg);
-    saveCalibration(cfg);
-  }, []);
-
   const latest = logs.length > 0 ? logs[0] : null;
+
+  const handleSaveCalibration = useCallback(async (cfg: CalibrationConfig) => {
+    setCalibration(cfg);
+    if (latest?.device_id) {
+      const { error } = await supabase
+        .from("device_settings")
+        .upsert({
+          device_id: latest.device_id,
+          dry_limit: cfg.dryLimit,
+          wet_limit: cfg.wetLimit,
+        });
+      if (error) {
+        console.error("Failed to save device settings:", error);
+      }
+    }
+  }, [supabase, latest]);
+
+
 
   // Derived values
   const moisturePct = latest
@@ -635,6 +670,7 @@ export function DashboardClient({
                   <MetricCard
                     title="VPD"
                     value={latest.vpd_kpa ? `${latest.vpd_kpa.toFixed(2)} kPa` : "N/A"}
+                    subtitle={dailySummary.previous?.vpd != null ? `Prev Day Avg: ${dailySummary.previous.vpd.toFixed(2)} kPa` : undefined}
                     icon={<Wind className="w-5 h-5 text-teal-400" />}
                     trend={null}
                   />
