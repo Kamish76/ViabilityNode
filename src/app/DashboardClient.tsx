@@ -30,6 +30,7 @@ import {
   evalDehydrationWarning,
   evalGrowthOptimization
 } from "./components/ThreatAlertsPanel";
+import { analyzePiecewiseDrainage } from "@/lib/piecewiseDrainage";
 import { DeploymentPanel, type Deployment } from "./components/DeploymentPanel";
 import { TrialProgressCard } from "./components/TrialProgressCard";
 import { SideNav } from "./components/SideNav";
@@ -508,11 +509,14 @@ export function DashboardClient({
     moisture_pct: calculateMoisturePct(r.soil_moisture_raw, calibration),
   }));
 
+  // Phase 4.5: Piecewise segmented drainage analysis
+  const piecewiseResult = analyzePiecewiseDrainage(drainageData);
+
   // Calculate overall viability status
   const currentPlantType = currentDeployment?.plant_type || null;
   const isPot = placementType === "pot";
-  const rot = evalRotWarning(drainageData, vpdHistory30, moisturePct, isPot, currentPlantType);
-  const dehy = evalDehydrationWarning(drainageData, vpdHistory30, moisturePct, isPot, currentPlantType);
+  const rot = evalRotWarning(drainageData, vpdHistory30, moisturePct, isPot, currentPlantType, piecewiseResult);
+  const dehy = evalDehydrationWarning(drainageData, vpdHistory30, moisturePct, isPot, currentPlantType, piecewiseResult);
   const growth = evalGrowthOptimization(dliHistory, drainageData, vpdHistory30, currentPlantType);
 
   const hasActiveThreat = rot.status === "active" || dehy.status === "active";
@@ -610,6 +614,7 @@ export function DashboardClient({
                   logs={logs}
                   placementType={placementType}
                   plantType={currentDeployment?.plant_type || null}
+                  piecewise={piecewiseResult}
                 />
               </div>
 
@@ -741,6 +746,7 @@ export function DashboardClient({
                   vpdHistory30={vpdHistory30}
                   drainageData={drainageData}
                   placementType={placementType}
+                  piecewise={piecewiseResult}
                 />
 
                 {/* 2.1 — Daily Light Integral */}

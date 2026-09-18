@@ -8,7 +8,15 @@ import {
   AlertTriangle,
   Clock,
   ArrowRight,
+  Gauge,
+  Wind,
 } from "lucide-react";
+import {
+  analyzePiecewiseDrainage,
+  type PiecewiseDrainageResult,
+  PHASE_1_BOUNDARY,
+  PHASE_3_BOUNDARY,
+} from "@/lib/piecewiseDrainage";
 import {
   AreaChart,
   Area,
@@ -442,10 +450,167 @@ function MoistureRangeBar({
   );
 }
 
+// ── Phase Indicator Bar ───────────────────────────────────────────────────────
+
+const PHASE_CONFIG = {
+  1: {
+    label: "Phase 1 — Gravitational Drainage",
+    shortLabel: "Gravity",
+    color: "#3b82f6",
+    bg: "bg-blue-950/20",
+    border: "border-blue-500/30",
+    text: "text-blue-400",
+    description: "Macropore drainage. Vital for oxygenation.",
+  },
+  2: {
+    label: "Phase 2 — Field Capacity",
+    shortLabel: "Field Cap.",
+    color: "#14b8a6",
+    bg: "bg-teal-950/20",
+    border: "border-teal-500/30",
+    text: "text-teal-400",
+    description: "Matric potential. Soil stabilising.",
+  },
+  3: {
+    label: "Phase 3 — Capillary / ET",
+    shortLabel: "Capillary",
+    color: "#f59e0b",
+    bg: "bg-amber-950/20",
+    border: "border-amber-500/30",
+    text: "text-amber-400",
+    description: "VPD & root uptake only.",
+  },
+} as const;
+
+function PhaseIndicatorBar({
+  currentPhase,
+  currentMoisture,
+}: {
+  currentPhase: 1 | 2 | 3 | null;
+  currentMoisture: number | null;
+}) {
+  if (currentPhase === null || currentMoisture === null) return null;
+
+  const cfg = PHASE_CONFIG[currentPhase];
+  // Position the indicator on a 0–100 scale (inverted: 100% moisture = left, 0% = right)
+  const position = Math.max(0, Math.min(100, 100 - currentMoisture));
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <span className={`w-2 h-2 rounded-full ${currentPhase === 1 ? "animate-pulse" : ""}`} style={{ backgroundColor: cfg.color }} />
+          <span className={`text-xs font-medium ${cfg.text}`}>{cfg.label}</span>
+        </div>
+        <span className="text-[10px] text-zinc-500">{cfg.description}</span>
+      </div>
+
+      {/* Phase bar */}
+      <div className="relative h-2.5 bg-zinc-800 rounded-full overflow-hidden">
+        {/* Phase 1: >70% (left portion) */}
+        <div
+          className="absolute inset-y-0 left-0 rounded-l-full"
+          style={{ width: "30%", backgroundColor: PHASE_CONFIG[1].color + "30" }}
+        />
+        {/* Phase 2: 30–70% (middle) */}
+        <div
+          className="absolute inset-y-0"
+          style={{ left: "30%", width: "40%", backgroundColor: PHASE_CONFIG[2].color + "20" }}
+        />
+        {/* Phase 3: <30% (right portion) */}
+        <div
+          className="absolute inset-y-0 right-0 rounded-r-full"
+          style={{ width: "30%", backgroundColor: PHASE_CONFIG[3].color + "20" }}
+        />
+        {/* Current position dot */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border-2 border-white shadow-lg transition-all duration-700"
+          style={{ left: `calc(${position}% - 5px)`, backgroundColor: cfg.color }}
+        />
+      </div>
+
+      {/* Phase labels */}
+      <div className="flex justify-between text-[9px] text-zinc-600">
+        <span>{'>'}{PHASE_1_BOUNDARY}%</span>
+        <span>{PHASE_3_BOUNDARY}–{PHASE_1_BOUNDARY}%</span>
+        <span>{'<'}{PHASE_3_BOUNDARY}%</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Piecewise Velocity Metrics ────────────────────────────────────────────────
+
+function PiecewiseVelocities({
+  piecewise,
+}: {
+  piecewise: PiecewiseDrainageResult;
+}) {
+  const hasData = piecewise.vGrav !== null || piecewise.vDry !== null;
+  if (!hasData && piecewise.wateringEvents === 0) return null;
+
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {/* V_grav — Gravitational Clearance Rate */}
+      <div className={`rounded-xl border bg-zinc-800/20 px-3 py-2.5 ${
+        piecewise.phase1Failure ? "border-red-500/40" : "border-zinc-800/60"
+      }`}>
+        <div className="flex items-center gap-1.5 mb-1">
+          <Gauge className="w-3 h-3 text-blue-400" />
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500">V<sub>grav</sub></span>
+        </div>
+        <p className={`text-sm font-semibold ${
+          piecewise.vGrav === null ? "text-zinc-500" :
+          piecewise.vGrav > 3 ? "text-emerald-400" :
+          piecewise.vGrav > 0.5 ? "text-blue-400" : "text-red-400"
+        }`}>
+          {piecewise.vGrav !== null ? `${piecewise.vGrav.toFixed(2)} %/hr` : "—"}
+        </p>
+        <p className="text-[10px] text-zinc-600 mt-0.5">
+          {piecewise.vGrav === null
+            ? piecewise.wateringEvents > 0 ? "Peak didn't reach Phase 1" : "No event"
+            : piecewise.phase1DurationHours !== null
+            ? `Phase 1 cleared in ${piecewise.phase1DurationHours.toFixed(1)}h`
+            : "Measuring..."}
+        </p>
+        {piecewise.phase1Failure && (
+          <p className="text-[10px] text-red-400 mt-1 flex items-center gap-1">
+            <AlertTriangle className="w-2.5 h-2.5" />
+            Macropore failure
+          </p>
+        )}
+      </div>
+
+      {/* V_dry — Transpiration / Drying Rate */}
+      <div className="rounded-xl border border-zinc-800/60 bg-zinc-800/20 px-3 py-2.5">
+        <div className="flex items-center gap-1.5 mb-1">
+          <Wind className="w-3 h-3 text-amber-400" />
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500">V<sub>dry</sub></span>
+        </div>
+        <p className={`text-sm font-semibold ${
+          piecewise.vDry === null ? "text-zinc-500" :
+          piecewise.vDry > 0.5 ? "text-amber-400" :
+          piecewise.vDry > 0.1 ? "text-zinc-300" : "text-zinc-500"
+        }`}>
+          {piecewise.vDry !== null ? `${piecewise.vDry.toFixed(2)} %/hr` : "—"}
+        </p>
+        <p className="text-[10px] text-zinc-600 mt-0.5">
+          {piecewise.vDry === null
+            ? "Hasn't reached Phase 3 yet"
+            : piecewise.phase3DurationHours !== null
+            ? `In Phase 3 for ${piecewise.phase3DurationHours.toFixed(1)}h`
+            : "Measuring..."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Card Component ───────────────────────────────────────────────────────
 
 export function DrainageCard({ data }: { data: DrainageInput[] }) {
   const result = analyzeDrainage(data);
+  const piecewise = analyzePiecewiseDrainage(data);
   const chartData = getRecentRawData(data);
 
   // Format retention time as human-readable
@@ -575,6 +740,17 @@ export function DrainageCard({ data }: { data: DrainageInput[] }) {
               </p>
             </div>
           </div>
+        )}
+
+        {/* Piecewise Drainage: Phase indicator + Velocities */}
+        {result.category !== "insufficient" && (
+          <>
+            <PhaseIndicatorBar
+              currentPhase={piecewise.currentPhase}
+              currentMoisture={result.currentMoisture}
+            />
+            <PiecewiseVelocities piecewise={piecewise} />
+          </>
         )}
 
         {/* Moisture Range Bar */}

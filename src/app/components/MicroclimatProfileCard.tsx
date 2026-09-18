@@ -4,6 +4,7 @@ import { Leaf, Droplets, Sun, Wind, Clock, AlertTriangle, CheckCircle2, Trending
 import type { DLIDataPoint } from "./DLIChart";
 import type { VPDDataPoint } from "./VPDChart";
 import { DrainageInput, analyzeDrainage } from "./DrainageCard";
+import type { PiecewiseDrainageResult } from "@/lib/piecewiseDrainage";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -209,11 +210,13 @@ export function MicroclimatProfileCard({
   vpdHistory30,
   drainageData,
   placementType,
+  piecewise,
 }: {
   dliHistory: DLIDataPoint[];
   vpdHistory30: VPDDataPoint[];
   drainageData: DrainageInput[];
   placementType?: string | null;
+  piecewise?: PiecewiseDrainageResult | null;
 }) {
   const isPot = placementType === "pot";
   const profile = computeProfile(dliHistory, vpdHistory30, drainageData);
@@ -300,10 +303,16 @@ export function MicroclimatProfileCard({
         <MetricRow
           icon={<Droplets className="w-4 h-4 text-emerald-400" />}
           title="Water Retention"
-          subtitle={isPot
-            ? "Pot drainage — fast is expected, slow = check drainage holes"
-            : "Time to lose 10% from peak after watering"
-          }
+          subtitle={(() => {
+            const base = isPot
+              ? "Pot drainage — fast is expected, slow = check drainage holes"
+              : "Time to lose 10% from peak after watering";
+            if (!piecewise || piecewise.wateringEvents === 0) return base;
+            const parts: string[] = [];
+            if (piecewise.vGrav !== null) parts.push(`V_grav: ${piecewise.vGrav.toFixed(2)} %/hr`);
+            if (piecewise.vDry !== null) parts.push(`V_dry: ${piecewise.vDry.toFixed(2)} %/hr`);
+            return parts.length > 0 ? `${base} · ${parts.join(' · ')}` : base;
+          })()}
           value={profile.retentionHours !== null ? (profile.retentionHours < 1 ? `${Math.round(profile.retentionHours * 60)}m` : profile.retentionHours.toFixed(1)) : "—"}
           unit={profile.retentionHours !== null ? (profile.retentionHours < 1 ? "" : "hours") : ""}
           meta={DRAIN_META[profile.drainClass]}
