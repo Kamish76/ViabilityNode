@@ -1,4 +1,9 @@
-import { TrendingUp, TrendingDown, Minus, Thermometer, Droplets, Wind, Sun, Leaf } from "lucide-react";
+"use client";
+
+import { useState } from "react";
+import { TrendingUp, TrendingDown, Minus, Thermometer, Droplets, Wind, Sun, Leaf, Copy, Check } from "lucide-react";
+import { analyzeDrainage, type DrainageInput } from "./DrainageCard";
+import type { PiecewiseDrainageResult } from "@/lib/piecewiseDrainage";
 
 export interface DaySummary {
   temp: number;
@@ -13,14 +18,82 @@ export interface DailySummaryData {
   previous: DaySummary | null;
 }
 
+function CopySummaryButton({
+  data,
+  viabilityStatus,
+  plantType,
+  drainageData,
+  piecewiseResult
+}: {
+  data: DailySummaryData;
+  viabilityStatus?: string | null;
+  plantType?: string | null;
+  drainageData?: DrainageInput[];
+  piecewiseResult?: PiecewiseDrainageResult;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    const textToCopy = `Climate Status Export
+
+Current Day Findings & Calculations:
+${data.current ? `- Temp: ${data.current.temp.toFixed(1)}°C
+- Humidity: ${data.current.humidity.toFixed(1)}%
+- VPD: ${data.current.vpd.toFixed(2)} kPa
+- Light: ${Math.round(data.current.light)} lx
+- Moisture (Raw): ${data.current.moistureRaw.toFixed(0)}` : 'N/A'}
+
+Previous Day Findings & Calculations:
+${data.previous ? `- Temp: ${data.previous.temp.toFixed(1)}°C
+- Humidity: ${data.previous.humidity.toFixed(1)}%
+- VPD: ${data.previous.vpd.toFixed(2)} kPa
+- Light: ${Math.round(data.previous.light)} lx
+- Moisture (Raw): ${data.previous.moistureRaw.toFixed(0)}` : 'N/A'}
+
+${drainageData && piecewiseResult ? (() => {
+  const drainageResult = analyzeDrainage(drainageData);
+  return `Soil Drainage & Analytics:
+- Status: ${drainageResult.label}
+- Retention Time: ${drainageResult.retentionHours !== null ? drainageResult.retentionHours + 'h' : 'N/A'}
+- 24h Change: ${drainageResult.netChange24h !== null ? (drainageResult.netChange24h > 0 ? '+' : '') + drainageResult.netChange24h + '%' : 'N/A'}
+- Watering Events (5d): ${drainageResult.wateringEvents}
+- V_grav: ${piecewiseResult.vGrav !== null ? piecewiseResult.vGrav.toFixed(2) + ' %/hr' : 'N/A'}
+- V_dry: ${piecewiseResult.vDry !== null ? piecewiseResult.vDry.toFixed(2) + ' %/hr' : 'N/A'}
+- Macropore Failure: ${piecewiseResult.phase1Failure ? 'Yes' : 'No'}
+`;
+})() : ''}
+Overall Status: ${viabilityStatus || 'Monitoring'}
+Plant Type: ${plantType || 'Standard'}
+`;
+    
+    navigator.clipboard.writeText(textToCopy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 bg-zinc-800/50 hover:bg-zinc-800 hover:text-zinc-200 rounded-lg transition-colors border border-zinc-700/50"
+    >
+      {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+      {copied ? "Copied" : "Copy Export"}
+    </button>
+  );
+}
+
 export function SummaryDashboard({ 
   data,
   viabilityStatus,
-  plantType 
+  plantType,
+  drainageData,
+  piecewiseResult
 }: { 
   data: DailySummaryData;
   viabilityStatus?: "optimal" | "warning" | "critical" | "monitoring" | null;
   plantType?: string | null;
+  drainageData?: DrainageInput[];
+  piecewiseResult?: PiecewiseDrainageResult;
 }) {
   if (!data.current) return null;
 
@@ -88,7 +161,14 @@ export function SummaryDashboard({
             Current day averages vs. previous day
           </p>
         </div>
-        <div className="mt-4 md:mt-0 flex items-center gap-2">
+        <div className="mt-4 md:mt-0 flex items-center gap-3">
+          <CopySummaryButton 
+            data={data} 
+            viabilityStatus={viabilityStatus} 
+            plantType={plantType} 
+            drainageData={drainageData}
+            piecewiseResult={piecewiseResult}
+          />
           {viabilityStatus ? (
             <div className={`flex items-center gap-2 px-4 py-2 rounded-full border ${
               viabilityStatus === 'optimal' ? 'bg-emerald-500/10 border-emerald-500/20' :

@@ -603,6 +603,8 @@ export function DashboardClient({
                   data={dailySummary}
                   viabilityStatus={viabilityStatus}
                   plantType={currentPlantType}
+                  drainageData={drainageData}
+                  piecewiseResult={piecewiseResult}
                 />
 
                 {/* Sitter Mode: Active Threat Alerts */}
