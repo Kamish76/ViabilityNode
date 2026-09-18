@@ -320,10 +320,19 @@ Key behaviors:
 ### 8.1 Component Hierarchy
 
 ```
-DrainageCard (main export)
+DrainageCard & MicroclimatProfileCard
 ├── Header (category badge, icon, title "Soil Water Dynamics")
 ├── Hero: Retention Time (big number or status text)
 ├── Stats Row
+│   ├── Total Cycle Time
+│   ├── Minimum Moisture (Baseline)
+│   └── Max Saturation (Peak)
+├── Historical Aggregates (MicroclimatProfileCard)
+│   ├── [ 7D | 30D ] Time Window Selector
+│   ├── Phase 1 (Gravitational) Average Rate
+│   ├── Phase 2 (Transit) Average Duration
+│   └── Phase 3 (Capillary ET) Average Rate
+```
 │   ├── 24h Change (netChange24h with trend icon)
 │   └── Watering Events (count in 5-day window)
 ├── PhaseIndicatorBar (3-phase progress bar)

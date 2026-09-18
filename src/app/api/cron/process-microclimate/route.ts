@@ -81,6 +81,10 @@ async function handleRequest(req: Request) {
     const thirtyDaysAgoIso = thirtyDaysAgo.toISOString();
     const thirtyDaysAgoDay = thirtyDaysAgoIso.slice(0, 10);
 
+    const sevenDaysAgo = new Date(endOfYesterday);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const sevenDaysAgoIso = sevenDaysAgo.toISOString();
+
     const results = [];
 
     for (const dId of devicesToProcess) {
@@ -136,6 +140,12 @@ async function handleRequest(req: Request) {
         };
       });
 
+      // 4. Extract 7-day subset for short-term profiling
+      const moisture7d = calibratedMoisture.filter(d => 
+        new Date(d.recorded_at).getTime() >= new Date(sevenDaysAgoIso).getTime()
+      );
+      const piecewise7d = analyzePiecewiseDrainage(moisture7d);
+
       const piecewise = analyzePiecewiseDrainage(calibratedMoisture);
 
       // Calculate days of data
@@ -168,6 +178,11 @@ async function handleRequest(req: Request) {
         avg_v_dry: piecewise.avgVDry,
         avg_phase2_duration: piecewise.avgPhase2Duration,
         total_events_analyzed: piecewise.totalEventsAnalyzed,
+        avg_v_grav_7d: piecewise7d.avgVGrav,
+        avg_v_dry_7d: piecewise7d.avgVDry,
+        avg_phase2_duration_7d: piecewise7d.avgPhase2Duration,
+        total_events_analyzed_7d: piecewise7d.totalEventsAnalyzed,
+        drain_class_7d: piecewise7d.drainClass ?? 'unknown',
       };
 
       const { error: upsertError } = await supabaseAdmin

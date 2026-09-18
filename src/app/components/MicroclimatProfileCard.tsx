@@ -11,6 +11,7 @@ export type DrainClass = "rapid" | "moderate" | "stagnant" | "unknown";
 export type VPDClass = "low" | "optimal" | "high" | "unknown";
 
 export interface PrecalculatedProfile {
+  device_id: string;
   dli_avg: number | null;
   dli_class: DLIClass;
   vpd_avg: number | null;
@@ -23,10 +24,15 @@ export interface PrecalculatedProfile {
   last_watered_at: string | null;
   current_phase: number | null;
   days_of_data: number;
-  avg_v_grav?: number | null;
-  avg_v_dry?: number | null;
-  avg_phase2_duration?: number | null;
-  total_events_analyzed?: number;
+  avg_v_grav: number | null;
+  avg_v_dry: number | null;
+  avg_phase2_duration: number | null;
+  total_events_analyzed: number;
+  avg_v_grav_7d: number | null;
+  avg_v_dry_7d: number | null;
+  avg_phase2_duration_7d: number | null;
+  total_events_analyzed_7d: number;
+  drain_class_7d: DrainClass;
 }
 
 // ─── Plant Lookup Table ───────────────────────────────────────────────────────
@@ -175,6 +181,7 @@ export function MicroclimatProfileCard({
   placementType?: string | null;
   deviceId?: string;
 }) {
+  const [timeWindow, setTimeWindow] = useState<"7d" | "30d">("30d");
   const [isRecalculating, setIsRecalculating] = useState(false);
   const router = useRouter();
   const isPot = placementType === "pot";
@@ -314,7 +321,7 @@ export function MicroclimatProfileCard({
           meta={DLI_META[profile.dli_class]}
         />
 
-        {/* ── 30-Day Drainage Profile ── */}
+        {/* ── Drainage Profile ── */}
         <div className="flex items-start gap-4 py-4 border-b border-zinc-800/60 last:border-0">
           <div className="shrink-0 p-2.5 rounded-xl bg-zinc-800/60">
             <Droplets className="w-4 h-4 text-emerald-400" />
@@ -322,68 +329,110 @@ export function MicroclimatProfileCard({
           <div className="flex-1 min-w-0">
             <div className="flex justify-between items-start mb-2">
               <div>
-                <p className="text-sm font-medium text-white">Drainage Profile</p>
+                <div className="text-sm font-medium text-white flex items-center gap-3">
+                  Drainage Profile
+                  <div className="flex items-center bg-zinc-900 rounded-lg p-0.5 border border-zinc-800/60">
+                    <button
+                      onClick={() => setTimeWindow("7d")}
+                      className={`px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors ${
+                        timeWindow === "7d"
+                          ? "bg-zinc-800 text-white"
+                          : "text-zinc-500 hover:text-zinc-300"
+                      }`}
+                    >
+                      7D
+                    </button>
+                    <button
+                      onClick={() => setTimeWindow("30d")}
+                      className={`px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors ${
+                        timeWindow === "30d"
+                          ? "bg-zinc-800 text-white"
+                          : "text-zinc-500 hover:text-zinc-300"
+                      }`}
+                    >
+                      30D
+                    </button>
+                  </div>
+                  <button
+                    onClick={handleRecalculate}
+                    disabled={!deviceId || isRecalculating}
+                    className="p-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors disabled:opacity-50"
+                    title="Sync Data (Rate limited: 1 per minute)"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRecalculating ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
                 <p className="text-xs text-zinc-500 mt-0.5">
-                  {(profile.total_events_analyzed ?? 0) >= 2
-                    ? `30-day average across ${profile.total_events_analyzed} watering cycles`
-                    : `Accumulating profile data... (${profile.total_events_analyzed ?? 0} cycles)`}
+                  {(() => {
+                    const count = timeWindow === "7d" ? (profile.total_events_analyzed_7d ?? 0) : (profile.total_events_analyzed ?? 0);
+                    return count >= 2
+                      ? `${timeWindow === "7d" ? '7' : '30'}-day average across ${count} watering cycles`
+                      : `Accumulating profile data... (${count} cycles)`;
+                  })()}
                 </p>
               </div>
               <div className="shrink-0 text-right space-y-1.5">
-                <ClassBadge {...DRAIN_META[profile.drain_class]} />
+                <ClassBadge {...DRAIN_META[timeWindow === "7d" ? (profile.drain_class_7d || 'unknown') : profile.drain_class]} />
               </div>
             </div>
 
-            {((profile.total_events_analyzed ?? 0) >= 2) ? (
-              <div className="grid grid-cols-3 gap-2 mt-3">
-                <PhaseMetric
-                  label="Phase 1 (Grav.)"
-                  valueStr={profile.avg_v_grav !== null && profile.avg_v_grav !== undefined ? profile.avg_v_grav.toFixed(2) : "—"}
-                  unit="%/hr"
-                  statusColor={
-                    (profile.avg_v_grav ?? 0) > 3.0 ? "text-emerald-400" :
-                      (profile.avg_v_grav ?? 0) >= 0.8 ? "text-amber-400" : "text-red-400"
-                  }
-                />
-                <PhaseMetric
-                  label="Phase 2 (Transit)"
-                  valueStr={profile.avg_phase2_duration !== null && profile.avg_phase2_duration !== undefined ? profile.avg_phase2_duration.toFixed(1) : "—"}
-                  unit="hrs"
-                  statusColor="text-blue-400"
-                />
-                <PhaseMetric
-                  label="Phase 3 (Cap. ET)"
-                  valueStr={profile.avg_v_dry !== null && profile.avg_v_dry !== undefined ? profile.avg_v_dry.toFixed(2) : "—"}
-                  unit="%/hr"
-                  statusColor={
-                    (profile.avg_v_dry ?? 0) > 0.5 ? "text-emerald-400" :
-                      (profile.avg_v_dry ?? 0) >= 0.1 ? "text-amber-400" : "text-red-400"
-                  }
-                />
-              </div>
-            ) : (
-              <div className="mt-3 p-3 rounded-xl bg-zinc-900/50 border border-zinc-800/60 flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-zinc-400">Current / Last Event</p>
-                  <p className="text-[10px] text-zinc-500">
-                    V<sub>grav</sub>: {profile.v_grav !== null ? profile.v_grav.toFixed(2) : "—"} %/hr · V<sub>dry</sub>: {profile.v_dry !== null ? profile.v_dry.toFixed(2) : "—"} %/hr
-                  </p>
+            {(() => {
+              const count = timeWindow === "7d" ? (profile.total_events_analyzed_7d ?? 0) : (profile.total_events_analyzed ?? 0);
+              const avgGrav = timeWindow === "7d" ? profile.avg_v_grav_7d : profile.avg_v_grav;
+              const avgPhase2 = timeWindow === "7d" ? profile.avg_phase2_duration_7d : profile.avg_phase2_duration;
+              const avgDry = timeWindow === "7d" ? profile.avg_v_dry_7d : profile.avg_v_dry;
+
+              return count >= 2 ? (
+                <div className="grid grid-cols-3 gap-2 mt-3">
+                  <PhaseMetric
+                    label="Phase 1 (Grav.)"
+                    valueStr={avgGrav !== null && avgGrav !== undefined ? avgGrav.toFixed(2) : "—"}
+                    unit="%/hr"
+                    statusColor={
+                      (avgGrav ?? 0) > 3.0 ? "text-emerald-400" :
+                        (avgGrav ?? 0) >= 0.8 ? "text-amber-400" : "text-red-400"
+                    }
+                  />
+                  <PhaseMetric
+                    label="Phase 2 (Transit)"
+                    valueStr={avgPhase2 !== null && avgPhase2 !== undefined ? avgPhase2.toFixed(1) : "—"}
+                    unit="hrs"
+                    statusColor="text-blue-400"
+                  />
+                  <PhaseMetric
+                    label="Phase 3 (Cap. ET)"
+                    valueStr={avgDry !== null && avgDry !== undefined ? avgDry.toFixed(2) : "—"}
+                    unit="%/hr"
+                    statusColor={
+                      (avgDry ?? 0) > 0.5 ? "text-emerald-400" :
+                        (avgDry ?? 0) >= 0.1 ? "text-amber-400" : "text-red-400"
+                    }
+                  />
                 </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-white tabular-nums">
-                    {(() => {
-                      if (profile.retention_hours === null) return "—";
-                      if (profile.retention_hours < 1) return `${Math.round(profile.retention_hours * 60)} min`;
-                      if (profile.retention_hours < 24) return `${profile.retention_hours.toFixed(1)} hrs`;
-                      const days = Math.floor(profile.retention_hours / 24);
-                      const hrs = Math.round(profile.retention_hours % 24);
-                      return `${days}d ${hrs}h`;
-                    })()}
-                  </p>
-                  <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Retention</p>
+              ) : (
+                <div className="mt-3 p-3 rounded-xl bg-zinc-900/50 border border-zinc-800/60 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-zinc-400">Current / Last Event</p>
+                    <p className="text-[10px] text-zinc-500">
+                      V<sub>grav</sub>: {profile.v_grav !== null ? profile.v_grav.toFixed(2) : "—"} %/hr · V<sub>dry</sub>: {profile.v_dry !== null ? profile.v_dry.toFixed(2) : "—"} %/hr
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-white tabular-nums">
+                      {(() => {
+                        if (profile.retention_hours === null) return "—";
+                        if (profile.retention_hours < 1) return `${Math.round(profile.retention_hours * 60)} min`;
+                        if (profile.retention_hours < 24) return `${profile.retention_hours.toFixed(1)} hrs`;
+                        const days = Math.floor(profile.retention_hours / 24);
+                        const hrs = Math.round(profile.retention_hours % 24);
+                        return `${days}d ${hrs}h`;
+                      })()}
+                    </p>
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Retention</p>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
 
