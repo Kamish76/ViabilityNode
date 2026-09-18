@@ -56,7 +56,7 @@ export function evalRotWarning(
 ): ThreatResult {
   // Base thresholds
   let satThreshold = isPot ? 75 : 85;
-  let flatThreshold = isPot ? 6 : 8;
+  const flatThreshold = isPot ? 6 : 8;
   let windowHours = isPot ? 48 : 72;
 
   // Plant-specific adjustments
@@ -446,7 +446,7 @@ export function ThreatAlertsPanel({
 
   const hasActive  = rot.status === "active"    || dehydration.status === "active" || lightPol.status === "active";
   const hasAtRisk  = rot.status === "at-risk"   || dehydration.status === "at-risk" || lightPol.status === "at-risk";
-  const allClear   = rot.status === "clear"     && dehydration.status === "clear" && lightPol.status === "clear";
+
   const isOptimal  = growth.status === "active";
 
   return (

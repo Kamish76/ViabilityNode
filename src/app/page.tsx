@@ -36,55 +36,33 @@ export default async function DashboardPage() {
   const deviceId = dataToUse?.[0]?.device_id ?? null;
 
   // ── 0. Daily Summary Data (Current vs Previous Day) ───────────────
-  const fortyEightHoursAgo = new Date();
-  fortyEightHoursAgo.setDate(fortyEightHoursAgo.getDate() - 2);
-  
-  let recentTelemetry: any[] = [];
-  if (deviceId) {
-    const { data } = await supabaseAdmin
-      .from("telemetry")
-      .select("recorded_at, temperature_c, humidity_rh, illuminance_lux, soil_moisture_raw")
-      .eq("device_id", deviceId)
-      .gte("recorded_at", fortyEightHoursAgo.toISOString())
-      .order("recorded_at", { ascending: false });
-    recentTelemetry = data ?? [];
-  }
+  const { data: summaryData } = await supabaseAdmin
+    .from("daily_telemetry_summary")
+    .select("*")
+    .eq("device_id", deviceId ?? "")
+    .order("day", { ascending: false })
+    .limit(2);
 
   let currentSummary = null;
   let previousSummary = null;
 
-  if (recentTelemetry && recentTelemetry.length > 0) {
-    const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().slice(0, 10);
-
-    const todayRows = recentTelemetry.filter(r => (r.recorded_at as string).startsWith(todayStr));
-    const yesterdayRows = recentTelemetry.filter(r => (r.recorded_at as string).startsWith(yesterdayStr));
-
-    const computeAvg = (rows: any[]) => {
-      if (rows.length === 0) return null;
-      let temp = 0, hum = 0, vpd = 0, lux = 0, moisture = 0;
-      for (const r of rows) {
-        temp += r.temperature_c as number;
-        hum += r.humidity_rh as number;
-        lux += r.illuminance_lux as number;
-        moisture += r.soil_moisture_raw as number;
-        const eSat = 0.61078 * Math.exp((17.27 * r.temperature_c) / (r.temperature_c + 237.3));
-        vpd += eSat * (1 - r.humidity_rh / 100);
-      }
-      return {
-        temp: temp / rows.length,
-        humidity: hum / rows.length,
-        vpd: vpd / rows.length,
-        light: lux / rows.length,
-        moistureRaw: moisture / rows.length,
-      };
+  if (summaryData && summaryData.length > 0) {
+    currentSummary = {
+      temp: summaryData[0].avg_temperature_c,
+      humidity: summaryData[0].avg_humidity_rh,
+      vpd: summaryData[0].avg_vpd_kpa,
+      light: summaryData[0].avg_illuminance_lux,
+      moistureRaw: summaryData[0].avg_soil_moisture_raw,
     };
-
-    currentSummary = computeAvg(todayRows);
-    previousSummary = computeAvg(yesterdayRows);
+    if (summaryData.length > 1) {
+      previousSummary = {
+        temp: summaryData[1].avg_temperature_c,
+        humidity: summaryData[1].avg_humidity_rh,
+        vpd: summaryData[1].avg_vpd_kpa,
+        light: summaryData[1].avg_illuminance_lux,
+        moistureRaw: summaryData[1].avg_soil_moisture_raw,
+      };
+    }
   }
   
   const dailySummary = { current: currentSummary, previous: previousSummary };
@@ -96,7 +74,7 @@ export default async function DashboardPage() {
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-  let batteryRows: any[] = [];
+  let batteryRows: { recorded_at: string; battery_pct: number }[] = [];
   if (deviceId) {
     const { data } = await supabaseAdmin
       .from("telemetry")
@@ -124,7 +102,6 @@ export default async function DashboardPage() {
   }
 
   // ── 3. Phase 2.1: Daily Light Integral — last 30 days ────────────────────
-  // Try the daily_dli view first; fall back to computing from raw telemetry
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
@@ -139,50 +116,8 @@ export default async function DashboardPage() {
       .order("day", { ascending: false })
       .limit(30);
 
-    if (dliError || !dliRows || dliRows.length === 0) {
-      // View not yet applied or empty — fall back to computing from raw telemetry with trapezoidal integration
-      console.warn("daily_dli view not found or empty, computing from raw telemetry");
-      const { data: rawLux } = await supabaseAdmin
-        .from("telemetry")
-        .select("recorded_at, illuminance_lux")
-        .eq("device_id", deviceId)
-        .gte("recorded_at", thirtyDaysAgo.toISOString())
-        .order("recorded_at", { ascending: true })
-        .limit(5000);
-
-      const dayMap = new Map<string, { dli: number; count: number }>();
-      let prevTime: number | null = null;
-      let prevPPFD: number | null = null;
-      
-      for (const r of rawLux ?? []) {
-        const day = new Date(r.recorded_at).toISOString().slice(0, 10);
-        const currTime = new Date(r.recorded_at).getTime();
-        const currPPFD = (r.illuminance_lux as number) * 0.0185;
-        
-        const existing = dayMap.get(day) ?? { dli: 0, count: 0 };
-        
-        if (prevTime !== null && prevPPFD !== null) {
-          const deltaSeconds = (currTime - prevTime) / 1000;
-          // Cap the delta to 2 hours (7200 seconds) to avoid massive gaps inflating DLI
-          const effectiveDelta = Math.min(deltaSeconds, 7200);
-          
-          // Trapezoidal integration
-          const dliIncrement = ((currPPFD + prevPPFD) / 2) * effectiveDelta / 1_000_000;
-          existing.dli += dliIncrement;
-        }
-        
-        existing.count += 1;
-        dayMap.set(day, existing);
-        
-        prevTime = currTime;
-        prevPPFD = currPPFD;
-      }
-
-      dliHistory = Array.from(dayMap.entries()).map(([day, { dli, count }]) => ({
-        day,
-        dli_mol_per_m2: parseFloat(dli.toFixed(4)),
-        reading_count: count,
-      })).sort((a, b) => b.day.localeCompare(a.day));
+    if (dliError) {
+      console.error("Failed to fetch daily_dli view:", dliError);
     } else {
       dliHistory = (dliRows ?? []) as DLIDataPoint[];
     }
@@ -202,33 +137,14 @@ export default async function DashboardPage() {
       .limit(5000);
 
     if (vpdError) {
-      // Compute VPD from raw temp + humidity
-      console.warn("vpd from view failed, computing from raw:", vpdError.message);
-      const { data: rawTH } = await supabaseAdmin
-        .from("telemetry")
-        .select("recorded_at, temperature_c, humidity_rh")
-        .eq("device_id", deviceId)
-        .gte("recorded_at", thirtyDaysAgo.toISOString())
-        .order("recorded_at", { ascending: true })
-        .limit(5000);
-
-      vpdHistory30 = (rawTH ?? []).map((r) => {
-        const temp = r.temperature_c as number;
-        const rh   = r.humidity_rh as number;
-        const eSat = 0.61078 * Math.exp((17.27 * temp) / (temp + 237.3));
-        return {
-          recorded_at: r.recorded_at as string,
-          vpd_kpa: parseFloat((eSat * (1 - rh / 100)).toFixed(3)),
-          temperature_c: temp,
-          humidity_rh: rh,
-        };
-      });
+      console.error("Failed to fetch vpd from telemetry_with_vpd:", vpdError.message);
     } else {
       vpdHistory30 = (vpdRows ?? []) as VPDDataPoint[];
     }
   }
 
   // Thin VPD to last 7 days, ≤ 300 points for the chart
+  // eslint-disable-next-line react-hooks/purity
   const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const vpd7Day = vpdHistory30.filter(d => new Date(d.recorded_at).getTime() >= sevenDaysAgoMs);
   const thinFactor = Math.max(1, Math.floor(vpd7Day.length / 300));
@@ -264,7 +180,20 @@ export default async function DashboardPage() {
   let activeDeployment: Deployment | null = null;
   let deploymentHistory: Deployment[] = [];
 
+  let deviceSettings = null;
+
   if (deviceId) {
+    // Fetch device settings
+    const { data: settingsData } = await supabaseAdmin
+      .from("device_settings")
+      .select("dry_limit, wet_limit, plant_type, placement_type")
+      .eq("device_id", deviceId)
+      .single();
+    
+    if (settingsData) {
+      deviceSettings = settingsData;
+    }
+
     // Fetch all deployments for this device (active first)
     const { data: deploymentRows, error: deploymentError } = await supabaseAdmin
       .from("node_deployments")
@@ -292,6 +221,7 @@ export default async function DashboardPage() {
       activeDeployment={activeDeployment}
       deploymentHistory={deploymentHistory}
       dailySummary={dailySummary}
+      initialDeviceSettings={deviceSettings}
     />
   );
 }

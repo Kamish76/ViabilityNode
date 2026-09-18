@@ -56,10 +56,6 @@ export interface BatterySnapshot {
   battery_pct: number;
 }
 
-// ─── Calibration defaults (prototype / debug values) ─────────────────────────
-
-const CALIBRATION_STORAGE_KEY = "viability_node_calibration";
-
 interface CalibrationConfig {
   dryLimit: number;   // ADC reading in air (≈ 1900)
   wetLimit: number;   // ADC reading fully submerged (≈ 1100)
@@ -70,24 +66,6 @@ const DEFAULT_CALIBRATION: CalibrationConfig = {
   wetLimit: 1000,   // Absolute wet (submerged in water reading)
 };
 
-function loadCalibration(): CalibrationConfig {
-  if (typeof window === "undefined") return DEFAULT_CALIBRATION;
-  try {
-    const raw = localStorage.getItem(CALIBRATION_STORAGE_KEY);
-    if (!raw) return DEFAULT_CALIBRATION;
-    const parsed = JSON.parse(raw);
-    return {
-      dryLimit: Number(parsed.dryLimit) || DEFAULT_CALIBRATION.dryLimit,
-      wetLimit: Number(parsed.wetLimit) || DEFAULT_CALIBRATION.wetLimit,
-    };
-  } catch {
-    return DEFAULT_CALIBRATION;
-  }
-}
-
-function saveCalibration(cfg: CalibrationConfig): void {
-  localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(cfg));
-}
 
 // ─── Calculations ─────────────────────────────────────────────────────────────
 
@@ -416,6 +394,7 @@ export function DashboardClient({
   activeDeployment: initialActiveDeployment,
   deploymentHistory: initialDeploymentHistory,
   dailySummary,
+  initialDeviceSettings,
 }: {
   initialLogs: TelemetryData[];
   batteryHistory: BatterySnapshot[];
@@ -427,18 +406,18 @@ export function DashboardClient({
   activeDeployment: Deployment | null;
   deploymentHistory: Deployment[];
   dailySummary: DailySummaryData;
+  initialDeviceSettings?: { dry_limit: number; wet_limit: number; plant_type?: string; placement_type?: string } | null;
 }) {
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
-  const [calibration, setCalibration] = useState<CalibrationConfig>(DEFAULT_CALIBRATION);
+  const [calibration, setCalibration] = useState<CalibrationConfig>(
+    initialDeviceSettings 
+      ? { dryLimit: initialDeviceSettings.dry_limit, wetLimit: initialDeviceSettings.wet_limit }
+      : DEFAULT_CALIBRATION
+  );
   const [showCalibration, setShowCalibration] = useState(false);
   const [currentDeployment, setCurrentDeployment] = useState<Deployment | null>(initialActiveDeployment);
   const [allDeployments, setAllDeployments] = useState<Deployment[]>(initialDeploymentHistory);
   const supabase = createClient();
-
-  // Load calibration from localStorage on mount (client-only)
-  useEffect(() => {
-    setCalibration(loadCalibration());
-  }, []);
 
   // Real-time subscription
   useEffect(() => {
@@ -462,12 +441,25 @@ export function DashboardClient({
     return () => { supabase.removeChannel(channel); };
   }, [supabase]);
 
-  const handleSaveCalibration = useCallback((cfg: CalibrationConfig) => {
-    setCalibration(cfg);
-    saveCalibration(cfg);
-  }, []);
-
   const latest = logs.length > 0 ? logs[0] : null;
+
+  const handleSaveCalibration = useCallback(async (cfg: CalibrationConfig) => {
+    setCalibration(cfg);
+    if (latest?.device_id) {
+      const { error } = await supabase
+        .from("device_settings")
+        .upsert({
+          device_id: latest.device_id,
+          dry_limit: cfg.dryLimit,
+          wet_limit: cfg.wetLimit,
+        });
+      if (error) {
+        console.error("Failed to save device settings:", error);
+      }
+    }
+  }, [supabase, latest]);
+
+
 
   // Derived values
   const moisturePct = latest
