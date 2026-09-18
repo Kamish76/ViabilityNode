@@ -182,6 +182,48 @@ Requires Phases 1–3 to be complete.
 
 ---
 
+## Phase 4.5 — Piecewise Drainage & CAM Enhancements (Research Report Integration)
+
+> Goal: Replace linear averaging with piecewise biophysical modeling and integrate CAM-specific ALAN sensitivity thresholds. Based on the *ViabilityNode Technical Research Report: Advanced Edge Algorithms for Biophysical and Soil-Water Dynamics*.
+
+### 4.5.1 Piecewise Segmented Drainage Engine
+
+Three-phase biophysical drainage model replacing the single-velocity retention analysis.
+
+- [x] Create `src/lib/piecewiseDrainage.ts` — pure logic module with phase boundaries (70%/30%)
+- [x] Implement V_grav (Gravitational Clearance Rate): `(Moisture_peak - Moisture_50%) / time` [%/hr]
+- [x] Implement V_dry (Drying/Transpiration Rate): `(Moisture_50% - Moisture_30%) / time` [%/hr]
+- [x] Phase 1 Failure detection: moisture >70% for 24h+ without adequate V_grav
+- [x] Backward-compatible `drainClass` mapping for MicroclimatProfileCard
+- [x] Phase indicator bar in DrainageCard showing current Phase 1/2/3 state
+- [x] V_grav and V_dry sub-metric cards in DrainageCard
+- [x] Piecewise velocities displayed in MicroclimatProfileCard subtitle
+
+**Current state:** ✅ Implemented. `piecewiseDrainage.ts` computes both velocities and phase durations from moisture history. `DrainageCard.tsx` renders a colour-coded phase bar and two velocity metric tiles. Phase 1 Failure detection highlights macropore drainage issues with a red border and warning label.
+
+### 4.5.2 CAM-Specific ALAN Thresholds
+
+Updated Night Light Pollution alert with research-derived biological lux thresholds.
+
+- [x] Succulent (CAM) disruption threshold: 8 lux (was 15 lux)
+- [x] Succulent (CAM) at-risk threshold: 2 lux (was 8 lux)
+- [x] Sustained duration requirement: >30 min above threshold before firing
+- [x] New "Sustained duration" condition row in alert detail
+- [x] Updated CAM-specific scientific explanation (phytochrome/cryptochrome, nocturnal CO2 assimilation)
+
+**Current state:** ✅ Implemented. `evalNightLightWarning()` uses research-grade thresholds and requires 30+ minutes of sustained light above threshold to fire, implementing the "Safe Twilight Window" concept from the report.
+
+### 4.5.3 Enhanced Sitter Mode Triggers
+
+- [x] Rot Warning: Phase 1 Failure (V_grav < 0.5 %/hr) replaces stdDev flatness check
+- [x] Dehydration Warning: VPD threshold updated from 1.5 to 1.6 kPa
+- [x] Dehydration Warning: Phase 3 Plateau detection (V_dry < 0.1 %/hr = stomatal closure)
+- [x] Enhanced condition labels with piecewise terminology when available
+
+**Current state:** ✅ Implemented. Both `evalRotWarning()` and `evalDehydrationWarning()` accept optional `PiecewiseDrainageResult` and use physically meaningful diagnostics. Falls back to original stdDev/threshold logic when piecewise data is unavailable.
+
+---
+
 ## Implementation Order (Strict Dependencies)
 
 ```

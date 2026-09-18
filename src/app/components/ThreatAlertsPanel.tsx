@@ -5,6 +5,10 @@ import type { VPDDataPoint } from "./VPDChart";
 import type { DLIDataPoint } from "./DLIChart";
 import { DrainageInput, analyzeDrainage } from "./DrainageCard";
 import { Moon } from "lucide-react";
+import {
+  analyzePiecewiseDrainage,
+  type PiecewiseDrainageResult,
+} from "@/lib/piecewiseDrainage";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,6 +57,7 @@ export function evalRotWarning(
   latestMoisture: number | null,
   isPot: boolean,
   plantType: string | null,
+  piecewise?: PiecewiseDrainageResult | null,
 ): ThreatResult {
   // Base thresholds
   let satThreshold = isPot ? 75 : 85;
@@ -73,10 +78,25 @@ export function evalRotWarning(
   const moisture = recentMoistureStats(drainageData, windowHours);
   const vpd48hAvg   = recentVpdAvg(vpdHistory, 48);
 
-  const highAndFlat =
-    moisture !== null &&
-    moisture.avg >= satThreshold &&
-    moisture.stdDev < flatThreshold;        // flat = little variation
+  // ── Enhanced Phase 1 Failure detection (Report Section 5, Trigger 1) ──
+  // If piecewise data is available, use V_grav to detect macropore drainage failure.
+  // This replaces the blunt stdDev < flatThreshold check with a physically meaningful diagnostic.
+  let highAndFlat: boolean;
+
+  if (piecewise && piecewise.wateringEvents > 0) {
+    // Phase 1 Failure: moisture is high AND gravitational clearance is inadequate
+    const phase1Failed = piecewise.phase1Failure ||
+      (piecewise.vGrav !== null && piecewise.vGrav < 0.5) ||
+      (piecewise.hoursAbove70 !== null && piecewise.hoursAbove70 > windowHours);
+    
+    highAndFlat = moisture !== null && moisture.avg >= satThreshold && phase1Failed;
+  } else {
+    // Fallback: original stdDev-based flatness check when piecewise data unavailable
+    highAndFlat =
+      moisture !== null &&
+      moisture.avg >= satThreshold &&
+      moisture.stdDev < flatThreshold;
+  }
 
   const lowVPD = vpd48hAvg !== null && vpd48hAvg < 0.4;
 
@@ -84,6 +104,22 @@ export function evalRotWarning(
   const active  = highAndFlat && lowVPD;
 
   const status: AlertStatus = active ? "active" : atRisk ? "at-risk" : "clear";
+
+  // Condition labels — use piecewise terminology when available
+  const moistureConditionLabel = piecewise && piecewise.wateringEvents > 0
+    ? `Phase 1 gravitational clearance < 0.5 %/hr (macropore drainage failure, ${plantType || 'standard'})`
+    : `Soil ≥ ${satThreshold}% moisture, flat for ${windowHours}h (${plantType || 'standard'} adjusted)`;
+
+  const moistureConditionValue = (() => {
+    if (piecewise && piecewise.wateringEvents > 0) {
+      const parts: string[] = [];
+      if (piecewise.vGrav !== null) parts.push(`V_grav: ${piecewise.vGrav.toFixed(2)} %/hr`);
+      if (piecewise.hoursAbove70 !== null) parts.push(`${piecewise.hoursAbove70.toFixed(1)}h above 70%`);
+      if (moisture) parts.push(`avg ${moisture.avg.toFixed(1)}%`);
+      return parts.length > 0 ? parts.join(' · ') : "Insufficient data";
+    }
+    return moisture ? `avg ${moisture.avg.toFixed(1)}% · σ ${moisture.stdDev.toFixed(1)}%` : "Insufficient data";
+  })();
 
   return {
     status,
@@ -93,12 +129,14 @@ export function evalRotWarning(
       : atRisk
       ? "One of two rot conditions detected — monitor closely"
       : "No rot risk detected",
-    detail: "Root rot triggers when soil stays saturated (no oxygen replenishment) while chronically low VPD prevents the plant from transpiring water upward. Both conditions must persist simultaneously.",
+    detail: piecewise && piecewise.wateringEvents > 0
+      ? "Root rot triggers when Phase 1 gravitational drainage fails (macropores blocked, no oxygen replenishment) while chronically low VPD prevents the plant from transpiring water upward. Both conditions must persist simultaneously."
+      : "Root rot triggers when soil stays saturated (no oxygen replenishment) while chronically low VPD prevents the plant from transpiring water upward. Both conditions must persist simultaneously.",
     conditions: [
       {
-        label: `Soil ≥ ${satThreshold}% moisture, flat for ${windowHours}h (${plantType || 'standard'} adjusted)`,
+        label: moistureConditionLabel,
         met:   highAndFlat,
-        value: moisture ? `avg ${moisture.avg.toFixed(1)}% · σ ${moisture.stdDev.toFixed(1)}%` : "Insufficient data",
+        value: moistureConditionValue,
       },
       {
         label: "48h VPD < 0.4 kPa (stagnant air)",
@@ -115,10 +153,11 @@ export function evalDehydrationWarning(
   latestMoisture: number | null,
   isPot: boolean,
   plantType: string | null,
+  piecewise?: PiecewiseDrainageResult | null,
 ): ThreatResult {
   // Base thresholds
   let dryThreshold = isPot ? 20 : 15;
-  let vpdDanger = 1.5;
+  let vpdDanger = 1.6; // Updated from 1.5 per Report Section 5
 
   if (plantType === "succulent") {
     // Succulents thrive in dry conditions
@@ -136,32 +175,58 @@ export function evalDehydrationWarning(
   const vpd7d   = recentVpdAvg(vpdHistory, 7 * 24);
   const highVPD = vpd7d !== null && vpd7d > vpdDanger;
 
-  const atRisk = (isDry && !highVPD) || (!isDry && highVPD);
-  const active  = isDry && highVPD;
+  // ── Enhanced Phase 3 Plateau detection (Report Section 5, Trigger 2) ──
+  // If V_dry < 0.1 %/hr, the soil is in a capillary stagnation zone.
+  // The plant has likely stopped transpiring (stomatal closure) — a sign of
+  // drought stress even if moisture hasn't hit the absolute dry threshold.
+  const phase3Plateau = piecewise?.vDry !== null && piecewise?.vDry !== undefined && piecewise.vDry < 0.1;
+  const phase3StressDetected = phase3Plateau && highVPD;
+
+  // Original trigger: dry soil + high VPD
+  // Enhanced trigger: Phase 3 plateau (stomatal closure) + high VPD
+  const atRisk = (isDry && !highVPD) || (!isDry && highVPD) || (phase3Plateau && !highVPD && !isDry);
+  const active  = (isDry && highVPD) || phase3StressDetected;
 
   const status: AlertStatus = active ? "active" : atRisk ? "at-risk" : "clear";
+
+  const conditions = [
+    {
+      label: `Current soil moisture < ${dryThreshold}% (${plantType || 'standard'} adjusted)`,
+      met:   isDry,
+      value: latestMoisture !== null ? `${latestMoisture.toFixed(1)}%` : "No reading",
+    },
+    {
+      label: `7-day VPD avg > ${vpdDanger.toFixed(1)} kPa (atmospheric drought)`,
+      met:   highVPD,
+      value: vpd7d !== null ? `${vpd7d.toFixed(3)} kPa` : "Insufficient data",
+    },
+  ];
+
+  // Add Phase 3 plateau condition when piecewise data is available
+  if (piecewise && piecewise.wateringEvents > 0) {
+    conditions.push({
+      label: "Phase 3 plateau: V_dry < 0.1 %/hr (stomatal closure suspected)",
+      met: phase3Plateau,
+      value: piecewise.vDry !== null ? `${piecewise.vDry.toFixed(3)} %/hr` : "Not in Phase 3",
+    });
+  }
 
   return {
     status,
     title: "Dehydration Warning",
     headline: active
-      ? "Soil critically dry with high atmospheric demand — leaf tissue loss risk"
+      ? phase3StressDetected && !isDry
+        ? "Phase 3 stagnation with high VPD — stomatal closure detected"
+        : "Soil critically dry with high atmospheric demand — leaf tissue loss risk"
       : atRisk
-      ? "One of two dehydration conditions present"
+      ? phase3Plateau
+        ? "Transpiration rate near zero — early drought stress signal"
+        : "One of two dehydration conditions present"
       : "Hydration status normal",
-    detail: "Dehydration stress occurs when soil water reserves are depleted (low moisture) while high VPD drives rapid transpiration from leaves faster than roots can supply. Stomata close, halting photosynthesis.",
-    conditions: [
-      {
-        label: `Current soil moisture < ${dryThreshold}% (${plantType || 'standard'} adjusted)`,
-        met:   isDry,
-        value: latestMoisture !== null ? `${latestMoisture.toFixed(1)}%` : "No reading",
-      },
-      {
-        label: `7-day VPD avg > ${vpdDanger.toFixed(1)} kPa`,
-        met:   highVPD,
-        value: vpd7d !== null ? `${vpd7d.toFixed(3)} kPa` : "Insufficient data",
-      },
-    ],
+    detail: phase3StressDetected
+      ? "The soil drying rate (V_dry) has dropped below 0.1 %/hr, indicating the plant has closed its stomata in response to drought stress. Combined with high atmospheric VPD, the plant cannot regulate its temperature through transpiration."
+      : "Dehydration stress occurs when soil water reserves are depleted (low moisture) while high VPD drives rapid transpiration from leaves faster than roots can supply. Stomata close, halting photosynthesis.",
+    conditions,
   };
 }
 
@@ -244,32 +309,61 @@ export function evalNightLightWarning(
   logs: { recorded_at: string; illuminance_lux: number }[],
   plantType: string | null,
 ): ThreatResult {
-  let luxThreshold = 50; 
-  let atRiskThreshold = 25;
+  // ── CAM-specific ALAN thresholds (Report Section 2, Table 1) ──
+  // Succulents (CAM plants): 2–8 lux causes stomatal closure & circadian decay.
+  // Previous thresholds (15 lux disruption / 8 lux at-risk) were too lenient.
+  let luxThreshold = 40;     // Disruption: confirmed biological impact
+  let atRiskThreshold = 20;  // At-risk: elevated but not yet disruptive
 
   if (plantType === "succulent") {
-    // CAM plants require darkness to open stomata and respire
-    luxThreshold = 15; 
-    atRiskThreshold = 8;
+    // CAM plants require strict dark periods for nocturnal CO2 assimilation.
+    // Even 2–8 lux triggers phytochrome/cryptochrome photoreceptors,
+    // causing immediate stomatal closure.
+    luxThreshold = 8; 
+    atRiskThreshold = 2;
   } else if (plantType === "carnivorous") {
-    luxThreshold = 40;
-    atRiskThreshold = 20;
-  } else if (plantType === "tropical") {
     luxThreshold = 30;
-    atRiskThreshold = 15;
+    atRiskThreshold = 10;
+  } else if (plantType === "tropical") {
+    luxThreshold = 25;
+    atRiskThreshold = 12;
   }
 
   const isNight = logs.length > 0 && (new Date(logs[0].recorded_at).getHours() >= 21 || new Date(logs[0].recorded_at).getHours() < 6);
 
-  const cutoff = Date.now() - 3600 * 1000;
+  // ── Sustained duration check ──
+  // The report notes that 11–13 lux is harmless if temporary (<30 min).
+  // Only flag if light has been above threshold for > 30 continuous minutes.
+  const cutoff = Date.now() - 3600 * 1000; // Last hour of data
   const recentLogs = logs.filter(l => new Date(l.recorded_at).getTime() >= cutoff);
   
   const avgLux = recentLogs.length > 0 
     ? recentLogs.reduce((s, l) => s + l.illuminance_lux, 0) / recentLogs.length
     : null;
 
-  const isPolluted = avgLux !== null && avgLux > luxThreshold;
-  const isAtRisk = avgLux !== null && avgLux > atRiskThreshold && !isPolluted;
+  // Calculate how many continuous minutes the light has been above threshold
+  let sustainedMinutes = 0;
+  if (recentLogs.length > 1) {
+    // Walk backward from the most recent reading to find continuous duration above threshold
+    const sortedRecent = [...recentLogs].sort(
+      (a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime()
+    );
+    
+    let prevTime = new Date(sortedRecent[0].recorded_at).getTime();
+    for (let i = 0; i < sortedRecent.length; i++) {
+      if (sortedRecent[i].illuminance_lux <= atRiskThreshold) break;
+      const t = new Date(sortedRecent[i].recorded_at).getTime();
+      if (i > 0 && prevTime - t > 3600 * 1000) break; // Gap too large
+      sustainedMinutes = (new Date(sortedRecent[0].recorded_at).getTime() - t) / (1000 * 60);
+      prevTime = t;
+    }
+  }
+
+  // Require >30 minutes sustained to trigger (Report Section 2: "Safe Twilight Window")
+  const isSustained = sustainedMinutes > 30;
+
+  const isPolluted = avgLux !== null && avgLux > luxThreshold && isSustained;
+  const isAtRisk = avgLux !== null && avgLux > atRiskThreshold && !isPolluted && isSustained;
 
   const active = isNight && isPolluted;
   const atRisk = isNight && isAtRisk;
@@ -287,7 +381,7 @@ export function evalNightLightWarning(
         ? "Dark period optimal" 
         : "Currently day cycle — N/A",
     detail: plantType === "succulent" 
-      ? "Succulents (CAM plants) require strict dark periods at night to open their stomata and absorb CO2. Light pollution disrupts this cycle, preventing respiration and leading to starvation."
+      ? "Succulents (CAM plants) open their stomata exclusively at night to absorb CO2, minimising daytime water loss. Even 2–8 lux of artificial light triggers phytochrome and cryptochrome photoreceptors, causing immediate stomatal closure. This stalls nocturnal carbon assimilation, prevents circadian entrainment, and disrupts interactions with nocturnal pollinators like moths and bats."
       : "Plants require a dark period for respiration and rest. Significant light pollution during the night cycle can disrupt their photoperiod, stressing the plant and stunting growth.",
     conditions: [
       {
@@ -299,6 +393,11 @@ export function evalNightLightWarning(
         label: `1h Avg Light > ${luxThreshold} lx (${plantType || 'standard'} tolerance)`,
         met: isPolluted,
         value: avgLux !== null ? `${avgLux.toFixed(1)} lx` : "No data",
+      },
+      {
+        label: "Sustained > 30 min above threshold",
+        met: isSustained,
+        value: sustainedMinutes > 0 ? `${Math.round(sustainedMinutes)} min continuous` : "< 1 min",
       },
     ],
   };
@@ -429,6 +528,7 @@ export function ThreatAlertsPanel({
   logs,
   placementType,
   plantType,
+  piecewise,
 }: {
   drainageData:   DrainageInput[];
   vpdHistory30:   VPDDataPoint[];
@@ -437,10 +537,11 @@ export function ThreatAlertsPanel({
   logs:           { recorded_at: string; illuminance_lux: number }[];
   placementType?: string | null;
   plantType?:     string | null;
+  piecewise?:     PiecewiseDrainageResult | null;
 }) {
   const isPot = placementType === "pot";
-  const rot          = evalRotWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null);
-  const dehydration  = evalDehydrationWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null);
+  const rot          = evalRotWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null, piecewise);
+  const dehydration  = evalDehydrationWarning(drainageData, vpdHistory30, latestMoisture, isPot, plantType || null, piecewise);
   const growth       = evalGrowthOptimization(dliHistory, drainageData, vpdHistory30, plantType || null);
   const lightPol     = evalNightLightWarning(logs, plantType || null);
 

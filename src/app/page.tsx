@@ -3,6 +3,7 @@ import { DashboardClient, TelemetryData, BatterySnapshot } from "./DashboardClie
 import type { DLIDataPoint } from "./components/DLIChart";
 import type { VPDDataPoint } from "./components/VPDChart";
 import type { Deployment } from "./components/DeploymentPanel";
+import type { PrecalculatedProfile } from "./components/MicroclimatProfileCard";
 
 // Opt out of static rendering so we fetch fresh data on reload
 export const dynamic = "force-dynamic";
@@ -123,15 +124,13 @@ export default async function DashboardPage() {
     }
   }
 
-  // ── 4. Phase 2.3 + 3: VPD — 30-day readings (chart uses thinned 7-day subset)
-  // Fetch 30 days so Phase 3 profile card can compute a proper long-term average.
-  let vpdHistory30: VPDDataPoint[] = [];
+  let vpdHistory: VPDDataPoint[] = [];
   if (deviceId) {
     const { data: vpdRows, error: vpdError } = await supabaseAdmin
       .from("telemetry_with_vpd")
       .select("recorded_at, vpd_kpa, temperature_c, humidity_rh")
       .eq("device_id", deviceId)
-      .gte("recorded_at", thirtyDaysAgo.toISOString())
+      .gte("recorded_at", sevenDaysAgo.toISOString())
       .not("vpd_kpa", "is", null)
       .order("recorded_at", { ascending: true })
       .limit(5000);
@@ -139,14 +138,14 @@ export default async function DashboardPage() {
     if (vpdError) {
       console.error("Failed to fetch vpd from telemetry_with_vpd:", vpdError.message);
     } else {
-      vpdHistory30 = (vpdRows ?? []) as VPDDataPoint[];
+      vpdHistory = (vpdRows ?? []) as VPDDataPoint[];
     }
   }
 
-  // Thin VPD to last 7 days, ≤ 300 points for the chart
+  // Thin VPD for the chart
   // eslint-disable-next-line react-hooks/purity
   const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const vpd7Day = vpdHistory30.filter(d => new Date(d.recorded_at).getTime() >= sevenDaysAgoMs);
+  const vpd7Day = vpdHistory.filter(d => new Date(d.recorded_at).getTime() >= sevenDaysAgoMs);
   const thinFactor = Math.max(1, Math.floor(vpd7Day.length / 300));
   const vpdThinned = vpd7Day.filter((_, i) => i % thinFactor === 0);
 
@@ -156,16 +155,14 @@ export default async function DashboardPage() {
       ? vpdThinned.reduce((s, d) => s + d.vpd_kpa, 0) / vpdThinned.length
       : null;
 
-  // ── 5. Phase 2.2 + 3: Soil drainage — 30-day moisture history ───────────
-  // Extended to 30 days so the drainage slope and Phase 3 profile card can
-  // detect saturation events further back in time.
+  // ── 5. Phase 2.2 + 3: Soil drainage — 7-day moisture history ───────────
   let moistureHistory: { recorded_at: string; soil_moisture_raw: number }[] = [];
   if (deviceId) {
     const { data: moistureRows } = await supabaseAdmin
       .from("telemetry")
       .select("recorded_at, soil_moisture_raw")
       .eq("device_id", deviceId)
-      .gte("recorded_at", thirtyDaysAgo.toISOString())
+      .gte("recorded_at", sevenDaysAgo.toISOString())
       .order("recorded_at", { ascending: true })
       .limit(5000);
 
@@ -209,6 +206,20 @@ export default async function DashboardPage() {
     }
   }
 
+  // ── 7. Fetch precalculated microclimate profile ─────────────────────────
+  let microclimateProfile: PrecalculatedProfile | null = null;
+  if (deviceId) {
+    const { data: profileData, error: profileError } = await supabaseAdmin
+      .from("node_microclimates")
+      .select("*")
+      .eq("device_id", deviceId)
+      .single();
+
+    if (profileData) {
+      microclimateProfile = profileData as PrecalculatedProfile;
+    }
+  }
+
   return (
     <DashboardClient
       initialLogs={dataToUse ?? []}
@@ -216,12 +227,13 @@ export default async function DashboardPage() {
       dliHistory={dliHistory}
       vpdHistory={vpdThinned}
       vpdRollingAvg={vpdRollingAvg}
-      vpdHistory30={vpdHistory30}
+      vpdHistory7={vpdHistory}
       moistureHistory={moistureHistory}
       activeDeployment={activeDeployment}
       deploymentHistory={deploymentHistory}
       dailySummary={dailySummary}
       initialDeviceSettings={deviceSettings}
+      microclimateProfile={microclimateProfile}
     />
   );
 }

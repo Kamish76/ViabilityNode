@@ -21,5 +21,11 @@
         { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
       ]
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/process-microclimate",
+      "schedule": "0 0 * * *"
+    }
   ]
 }
