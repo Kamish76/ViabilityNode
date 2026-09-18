@@ -23,7 +23,7 @@ import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
 import { VPDChart, type VPDDataPoint } from "./components/VPDChart";
 import { AtmosphericCorrelationChart } from "./components/AtmosphericCorrelationChart";
 import { DrainageCard, type DrainageInput } from "./components/DrainageCard";
-import { MicroclimatProfileCard } from "./components/MicroclimatProfileCard";
+import { MicroclimatProfileCard, type PrecalculatedProfile } from "./components/MicroclimatProfileCard";
 import {
   ThreatAlertsPanel,
   evalRotWarning,
@@ -390,24 +390,26 @@ export function DashboardClient({
   dliHistory,
   vpdHistory,
   vpdRollingAvg,
-  vpdHistory30,
+  vpdHistory7,
   moistureHistory,
   activeDeployment: initialActiveDeployment,
   deploymentHistory: initialDeploymentHistory,
   dailySummary,
   initialDeviceSettings,
+  microclimateProfile,
 }: {
   initialLogs: TelemetryData[];
   batteryHistory: BatterySnapshot[];
   dliHistory: DLIDataPoint[];
   vpdHistory: VPDDataPoint[];
   vpdRollingAvg: number | null;
-  vpdHistory30: VPDDataPoint[];
+  vpdHistory7: VPDDataPoint[];
   moistureHistory: { recorded_at: string; soil_moisture_raw: number }[];
   activeDeployment: Deployment | null;
   deploymentHistory: Deployment[];
   dailySummary: DailySummaryData;
   initialDeviceSettings?: { dry_limit: number; wet_limit: number; plant_type?: string; placement_type?: string } | null;
+  microclimateProfile: PrecalculatedProfile | null;
 }) {
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
   const [calibration, setCalibration] = useState<CalibrationConfig>(
@@ -515,9 +517,9 @@ export function DashboardClient({
   // Calculate overall viability status
   const currentPlantType = currentDeployment?.plant_type || null;
   const isPot = placementType === "pot";
-  const rot = evalRotWarning(drainageData, vpdHistory30, moisturePct, isPot, currentPlantType, piecewiseResult);
-  const dehy = evalDehydrationWarning(drainageData, vpdHistory30, moisturePct, isPot, currentPlantType, piecewiseResult);
-  const growth = evalGrowthOptimization(dliHistory, drainageData, vpdHistory30, currentPlantType);
+  const rot = evalRotWarning(drainageData, vpdHistory7, moisturePct, isPot, currentPlantType, piecewiseResult);
+  const dehy = evalDehydrationWarning(drainageData, vpdHistory7, moisturePct, isPot, currentPlantType, piecewiseResult);
+  const growth = evalGrowthOptimization(dliHistory, drainageData, vpdHistory7, currentPlantType);
 
   const hasActiveThreat = rot.status === "active" || dehy.status === "active";
   const hasRisk = rot.status === "at-risk" || dehy.status === "at-risk";
@@ -610,7 +612,7 @@ export function DashboardClient({
                 {/* Sitter Mode: Active Threat Alerts */}
                 <ThreatAlertsPanel
                   drainageData={drainageData}
-                  vpdHistory30={vpdHistory30}
+                  vpdHistory30={vpdHistory7}
                   dliHistory={dliHistory}
                   latestMoisture={moisturePct}
                   logs={logs}
@@ -650,7 +652,7 @@ export function DashboardClient({
                     daysRemaining={daysRemaining}
                     currentBatteryPct={latest?.battery_pct ?? null}
                     dliHistory={dliHistory}
-                    vpdHistory30={vpdHistory30}
+                    vpdHistory30={vpdHistory7}
                     moistureHistory={calibratedMoistureHistory}
                   />
                 </div>
@@ -744,11 +746,9 @@ export function DashboardClient({
 
                 {/* 3.0 — Microclimate Profile Card (Phase 3) */}
                 <MicroclimatProfileCard
-                  dliHistory={dliHistory}
-                  vpdHistory30={vpdHistory30}
-                  drainageData={drainageData}
+                  profile={microclimateProfile}
                   placementType={placementType}
-                  piecewise={piecewiseResult}
+                  deviceId={latest?.device_id}
                 />
 
                 {/* 2.1 — Daily Light Integral */}

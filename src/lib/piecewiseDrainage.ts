@@ -88,6 +88,10 @@ export interface PiecewiseDrainageResult {
   wateringEvents: number;
   lastWateringAt: string | null;
   peakMoisture: number | null;
+  
+  // ── Historical Caching (New) ──
+  isHistoricalRate?: boolean;
+  historicalDrainClass?: "rapid" | "moderate" | "stagnant" | "unknown";
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -374,6 +378,8 @@ export function analyzePiecewiseDrainage(
     wateringEvents: 0,
     lastWateringAt: null,
     peakMoisture: null,
+    isHistoricalRate: false,
+    historicalDrainClass: "unknown",
   };
 
   if (data.length < 6) return defaultResult;
@@ -393,13 +399,14 @@ export function analyzePiecewiseDrainage(
 
   if (window.length < 2) return defaultResult;
 
-  // Detect watering events
-  const events = detectWateringEvents(window);
+  // Detect watering events over the ENTIRE historical dataset, not just the window
+  const allEvents = detectWateringEvents(filtered);
+  const eventsInWindow = detectWateringEvents(window);
 
-  // Analyze current phase
+  // Analyze current phase using the recent window
   const phaseInfo = analyzeCurrentPhase(window);
 
-  if (events.length === 0) {
+  if (allEvents.length === 0) {
     return {
       ...defaultResult,
       ...phaseInfo,
@@ -407,9 +414,12 @@ export function analyzePiecewiseDrainage(
     };
   }
 
-  // Compute velocities from the most recent watering event
-  const lastEvent = events[events.length - 1];
-  const velocities = computeVelocities(window, lastEvent);
+  // Compute velocities from the most recent historical watering event
+  const lastEvent = allEvents[allEvents.length - 1];
+  const velocities = computeVelocities(filtered, lastEvent);
+  
+  // If the last event is outside our 5-day window, flag it as historical
+  const isHistoricalRate = toMs(lastEvent.peakTimestamp) < cutoff;
 
   // Phase 1 Failure detection (Report Section 5, Trigger 1):
   // Moisture stays >70% for extended period without adequate V_grav
@@ -433,8 +443,10 @@ export function analyzePiecewiseDrainage(
     hoursAbove70: phaseInfo.hoursAbove70,
     drainClass,
     retentionHours: velocities.retentionHours,
-    wateringEvents: events.length,
+    wateringEvents: eventsInWindow.length,
     lastWateringAt: lastEvent.peakTimestamp,
     peakMoisture: lastEvent.peakMoisture,
+    isHistoricalRate,
+    historicalDrainClass: drainClass,
   };
 }

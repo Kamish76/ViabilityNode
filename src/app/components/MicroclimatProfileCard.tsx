@@ -1,26 +1,28 @@
 "use client";
 
-import { Leaf, Droplets, Sun, Wind, Clock, AlertTriangle, CheckCircle2, TrendingUp } from "lucide-react";
-import type { DLIDataPoint } from "./DLIChart";
-import type { VPDDataPoint } from "./VPDChart";
-import { DrainageInput, analyzeDrainage } from "./DrainageCard";
-import type { PiecewiseDrainageResult } from "@/lib/piecewiseDrainage";
+import { useState } from "react";
+import { Leaf, Droplets, Sun, Wind, Clock, AlertTriangle, CheckCircle2, TrendingUp, RefreshCw } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DLIClass    = "low" | "moderate" | "high" | "unknown";
-type DrainClass  = "rapid" | "moderate" | "stagnant" | "unknown";
-type VPDClass    = "low" | "optimal" | "high" | "unknown";
+export type DLIClass    = "low" | "moderate" | "high" | "unknown";
+export type DrainClass  = "rapid" | "moderate" | "stagnant" | "unknown";
+export type VPDClass    = "low" | "optimal" | "high" | "unknown";
 
-interface MicroclimatProfile {
-  dliAvg:       number | null;
-  dliClass:     DLIClass;
-  retentionHours: number | null;
-  drainClass:   DrainClass;
-  vpdAvg:       number | null;
-  vpdClass:     VPDClass;
-  daysOfData:   number;
-  isNature:     boolean; // true when ≥ 14 days accumulated (enough for a meaningful profile)
+export interface PrecalculatedProfile {
+  dli_avg: number | null;
+  dli_class: DLIClass;
+  vpd_avg: number | null;
+  vpd_class: VPDClass;
+  v_grav: number | null;
+  v_dry: number | null;
+  drain_class: DrainClass;
+  retention_hours: number | null;
+  is_historical_rate: boolean;
+  last_watered_at: string | null;
+  current_phase: number | null;
+  days_of_data: number;
 }
 
 // ─── Plant Lookup Table ───────────────────────────────────────────────────────
@@ -66,77 +68,6 @@ const VPD_MODIFIER: Record<VPDClass, { note: string; color: string; icon: typeof
   unknown: null,
 };
 
-// ─── Classification helpers ───────────────────────────────────────────────────
-
-function classifyDLI(avg: number | null): DLIClass {
-  if (avg === null) return "unknown";
-  if (avg < 5)      return "low";
-  if (avg <= 15)    return "moderate";
-  return "high";
-}
-
-function classifyVPD(avg: number | null): VPDClass {
-  if (avg === null) return "unknown";
-  if (avg < 0.4)    return "low";
-  if (avg <= 1.6)   return "optimal";
-  return "high";
-}
-
-function classifyDrain(drainClass: "rapid" | "moderate" | "stagnant" | "unknown"): DrainClass {
-  if (drainClass === "rapid")    return "rapid";
-  if (drainClass === "moderate") return "moderate";
-  if (drainClass === "stagnant") return "stagnant";
-  return "unknown";
-}
-
-// ─── Drainage slope from moisture history ─────────────────────────────────────
-
-
-
-// ─── Compute profile from data ────────────────────────────────────────────────
-
-function computeProfile(
-  dliHistory: DLIDataPoint[],
-  vpdHistory: VPDDataPoint[],
-  drainageData: DrainageInput[],
-): MicroclimatProfile {
-  // DLI 30-day avg
-  const dliAvg = dliHistory.length > 0
-    ? dliHistory.reduce((s, d) => s + d.dli_mol_per_m2, 0) / dliHistory.length
-    : null;
-
-  // VPD 30-day avg
-  const vpdAvg = vpdHistory.length > 0
-    ? vpdHistory.reduce((s, d) => s + d.vpd_kpa, 0) / vpdHistory.length
-    : null;
-
-  // Drainage — retention-based classification
-  const drainResult = analyzeDrainage(drainageData);
-  const retentionHours = drainResult.retentionHours;
-
-  // Days of data (from earliest DLI or moisture record)
-  const dliDays = dliHistory.length;
-  const moistureDays = drainageData.length > 0
-    ? Math.round(
-        (new Date(drainageData[drainageData.length - 1].recorded_at).getTime() -
-          new Date(drainageData[0].recorded_at).getTime()) /
-          86400000
-      )
-    : 0;
-  const daysOfData = Math.max(dliDays, moistureDays, 1);
-
-  return {
-    dliAvg,
-    dliClass:     classifyDLI(dliAvg),
-    retentionHours,
-    drainClass:   classifyDrain(drainResult.drainClass),
-    vpdAvg,
-    vpdClass:     classifyVPD(vpdAvg),
-    daysOfData,
-    isNature:     daysOfData >= 14,
-  };
-}
-
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 const DLI_META: Record<DLIClass, { label: string; color: string; bg: string; border: string }> = {
@@ -150,7 +81,7 @@ const DRAIN_META: Record<DrainClass, { label: string; color: string; bg: string;
   rapid:     { label: "Rapid",              color: "#34d399", bg: "#06402033", border: "#10b98140" },
   moderate:  { label: "Moderate",           color: "#fbbf24", bg: "#45230033", border: "#f59e0b40" },
   stagnant:  { label: "Stagnant/Hypoxic",   color: "#f87171", bg: "#450a0a33", border: "#ef444440" },
-  unknown:   { label: "No event detected",  color: "#71717a", bg: "#27272a33", border: "#3f3f4640" },
+  unknown:   { label: "Pending watering",  color: "#71717a", bg: "#27272a33", border: "#3f3f4640" },
 };
 
 const VPD_META: Record<VPDClass, { label: string; color: string; bg: string; border: string }> = {
@@ -206,23 +137,63 @@ function MetricRow({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function MicroclimatProfileCard({
-  dliHistory,
-  vpdHistory30,
-  drainageData,
+  profile,
   placementType,
-  piecewise,
+  deviceId,
 }: {
-  dliHistory: DLIDataPoint[];
-  vpdHistory30: VPDDataPoint[];
-  drainageData: DrainageInput[];
+  profile: PrecalculatedProfile | null;
   placementType?: string | null;
-  piecewise?: PiecewiseDrainageResult | null;
+  deviceId?: string;
 }) {
+  const [isRecalculating, setIsRecalculating] = useState(false);
+  const router = useRouter();
   const isPot = placementType === "pot";
-  const profile = computeProfile(dliHistory, vpdHistory30, drainageData);
-  const suggestion = PLANT_LOOKUP[profile.dliClass][profile.drainClass];
-  const vpdMod = VPD_MODIFIER[profile.vpdClass];
-  const maturityPct = Math.min(100, (profile.daysOfData / 30) * 100);
+
+  const handleRecalculate = async () => {
+    if (!deviceId || isRecalculating) return;
+    setIsRecalculating(true);
+    try {
+      const res = await fetch(`/api/cron/process-microclimate?device_id=${deviceId}`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        router.refresh();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to recalculate");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Network error while recalculating.");
+    } finally {
+      setIsRecalculating(false);
+    }
+  };
+
+  if (!profile) {
+    return (
+      <div className="rounded-3xl border border-zinc-700/60 bg-gradient-to-br from-zinc-900/80 via-zinc-900/60 to-zinc-950/80 backdrop-blur-xl shadow-2xl p-6 text-center">
+        <div className="flex items-center justify-center mb-4">
+          <Leaf className="w-8 h-8 text-zinc-600 animate-pulse" />
+        </div>
+        <p className="text-sm font-medium text-white">Pending first calculation</p>
+        <p className="text-xs text-zinc-500 mt-1 mb-4">Data is waiting to be processed by the backend cron.</p>
+        <button
+          onClick={handleRecalculate}
+          disabled={!deviceId || isRecalculating}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-sm font-medium rounded-xl transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 ${isRecalculating ? 'animate-spin' : ''}`} />
+          Calculate Now
+        </button>
+      </div>
+    );
+  }
+
+  const suggestion = PLANT_LOOKUP[profile.dli_class][profile.drain_class];
+  const vpdMod = VPD_MODIFIER[profile.vpd_class];
+  const isNature = profile.days_of_data >= 14;
+  const maturityPct = Math.min(100, (profile.days_of_data / 30) * 100);
 
   return (
     <div className="rounded-3xl border border-zinc-700/60 bg-gradient-to-br from-zinc-900/80 via-zinc-900/60 to-zinc-950/80 backdrop-blur-xl shadow-2xl overflow-hidden">
@@ -249,20 +220,32 @@ export function MicroclimatProfileCard({
           </div>
         </div>
 
-        {/* Maturity indicator */}
-        <div className="text-right shrink-0">
-          {profile.isNature ? (
-            <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-400">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Profile active
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-500">
-              <Clock className="w-3.5 h-3.5" />
-              Accumulating…
-            </div>
-          )}
-          <p className="text-xs text-zinc-600 mt-0.5">{profile.daysOfData} / 30 days</p>
+        {/* Maturity indicator & Recalculate */}
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <div className="text-right">
+            {isNature ? (
+              <div className="flex items-center justify-end gap-1.5 text-xs font-medium text-emerald-400">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Profile active
+              </div>
+            ) : (
+              <div className="flex items-center justify-end gap-1.5 text-xs font-medium text-zinc-500">
+                <Clock className="w-3.5 h-3.5" />
+                Accumulating…
+              </div>
+            )}
+            <p className="text-xs text-zinc-600 mt-0.5">{profile.days_of_data} / 30 days</p>
+          </div>
+          
+          <button
+            onClick={handleRecalculate}
+            disabled={!deviceId || isRecalculating}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-zinc-400 bg-zinc-800/50 hover:bg-zinc-800 hover:text-zinc-200 rounded-lg transition-colors border border-zinc-700/50 disabled:opacity-50"
+            title="Recalculate based on latest telemetry"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRecalculating ? 'animate-spin' : ''}`} />
+            Sync
+          </button>
         </div>
       </div>
 
@@ -277,13 +260,13 @@ export function MicroclimatProfileCard({
             className="h-full rounded-full transition-all duration-700"
             style={{
               width: `${maturityPct}%`,
-              background: profile.isNature
+              background: isNature
                 ? "linear-gradient(90deg, #10b981, #34d399)"
                 : "linear-gradient(90deg, #3b82f6, #60a5fa)",
             }}
           />
         </div>
-        {!profile.isNature && (
+        {!isNature && (
           <p className="text-xs text-zinc-600 mt-1.5">
             Profile becomes fully reliable after 14+ days of continuous data.
           </p>
@@ -296,34 +279,44 @@ export function MicroclimatProfileCard({
           icon={<Sun className="w-4 h-4 text-amber-400" />}
           title="Light · DLI"
           subtitle="30-day cumulative photon avg"
-          value={profile.dliAvg !== null ? profile.dliAvg.toFixed(2) : "—"}
+          value={profile.dli_avg !== null ? profile.dli_avg.toFixed(2) : "—"}
           unit="mol/m²/day"
-          meta={DLI_META[profile.dliClass]}
+          meta={DLI_META[profile.dli_class]}
         />
         <MetricRow
           icon={<Droplets className="w-4 h-4 text-emerald-400" />}
           title="Water Retention"
           subtitle={(() => {
-            const base = isPot
-              ? "Pot drainage — fast is expected, slow = check drainage holes"
-              : "Time to lose 10% from peak after watering";
-            if (!piecewise || piecewise.wateringEvents === 0) return base;
+            let base = "Time to lose 10% from peak after watering";
+            if (profile.drain_class === 'unknown') {
+              return "Drainage pending next watering cycle";
+            }
+            if (profile.is_historical_rate && profile.last_watered_at) {
+              const dateStr = new Date(profile.last_watered_at).toLocaleDateString([], { month: 'short', day: 'numeric' });
+              base = `Historical Rate (Last watered ${dateStr})`;
+            } else if (isPot) {
+              base = "Pot drainage — fast is expected, slow = check drainage holes";
+            }
+            if (profile.current_phase === 3) {
+              base += " — Capillary Plateau / Dry";
+            }
+            
             const parts: string[] = [];
-            if (piecewise.vGrav !== null) parts.push(`V_grav: ${piecewise.vGrav.toFixed(2)} %/hr`);
-            if (piecewise.vDry !== null) parts.push(`V_dry: ${piecewise.vDry.toFixed(2)} %/hr`);
+            if (profile.v_grav !== null) parts.push(`V_grav: ${profile.v_grav.toFixed(2)} %/hr`);
+            if (profile.v_dry !== null) parts.push(`V_dry: ${profile.v_dry.toFixed(2)} %/hr`);
             return parts.length > 0 ? `${base} · ${parts.join(' · ')}` : base;
           })()}
-          value={profile.retentionHours !== null ? (profile.retentionHours < 1 ? `${Math.round(profile.retentionHours * 60)}m` : profile.retentionHours.toFixed(1)) : "—"}
-          unit={profile.retentionHours !== null ? (profile.retentionHours < 1 ? "" : "hours") : ""}
-          meta={DRAIN_META[profile.drainClass]}
+          value={profile.retention_hours !== null ? (profile.retention_hours < 1 ? `${Math.round(profile.retention_hours * 60)}m` : profile.retention_hours.toFixed(1)) : "—"}
+          unit={profile.retention_hours !== null ? (profile.retention_hours < 1 ? "" : "hours") : ""}
+          meta={DRAIN_META[profile.drain_class]}
         />
         <MetricRow
           icon={<Wind className="w-4 h-4 text-teal-400" />}
           title="VPD · Transpiration"
           subtitle="30-day atmospheric drying power"
-          value={profile.vpdAvg !== null ? profile.vpdAvg.toFixed(3) : "—"}
+          value={profile.vpd_avg !== null ? profile.vpd_avg.toFixed(3) : "—"}
           unit="kPa"
-          meta={VPD_META[profile.vpdClass]}
+          meta={VPD_META[profile.vpd_class]}
         />
       </div>
 
@@ -369,36 +362,36 @@ export function MicroclimatProfileCard({
           <span
             className="px-2 py-0.5 rounded-full border text-xs"
             style={{
-              color: DLI_META[profile.dliClass].color,
-              borderColor: DLI_META[profile.dliClass].border,
-              backgroundColor: DLI_META[profile.dliClass].bg,
+              color: DLI_META[profile.dli_class].color,
+              borderColor: DLI_META[profile.dli_class].border,
+              backgroundColor: DLI_META[profile.dli_class].bg,
             }}
           >
-            {DLI_META[profile.dliClass].label} DLI
+            {DLI_META[profile.dli_class].label} DLI
           </span>
           <span className="text-zinc-700">+</span>
           <span
             className="px-2 py-0.5 rounded-full border text-xs"
             style={{
-              color: DRAIN_META[profile.drainClass].color,
-              borderColor: DRAIN_META[profile.drainClass].border,
-              backgroundColor: DRAIN_META[profile.drainClass].bg,
+              color: DRAIN_META[profile.drain_class].color,
+              borderColor: DRAIN_META[profile.drain_class].border,
+              backgroundColor: DRAIN_META[profile.drain_class].bg,
             }}
           >
-            {DRAIN_META[profile.drainClass].label} Drainage
+            {DRAIN_META[profile.drain_class].label} Drainage
           </span>
-          {profile.vpdClass !== "optimal" && profile.vpdClass !== "unknown" && (
+          {profile.vpd_class !== "optimal" && profile.vpd_class !== "unknown" && (
             <>
               <span className="text-zinc-700">+</span>
               <span
                 className="px-2 py-0.5 rounded-full border text-xs"
                 style={{
-                  color: VPD_META[profile.vpdClass].color,
-                  borderColor: VPD_META[profile.vpdClass].border,
-                  backgroundColor: VPD_META[profile.vpdClass].bg,
+                  color: VPD_META[profile.vpd_class].color,
+                  borderColor: VPD_META[profile.vpd_class].border,
+                  backgroundColor: VPD_META[profile.vpd_class].bg,
                 }}
               >
-                {VPD_META[profile.vpdClass].label} VPD
+                {VPD_META[profile.vpd_class].label} VPD
               </span>
             </>
           )}
