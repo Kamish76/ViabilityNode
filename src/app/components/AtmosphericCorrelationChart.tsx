@@ -134,7 +134,8 @@ export function AtmosphericCorrelationChart({ logs }: Props) {
               itemStyle={{ fontSize: "12px" }}
               labelStyle={{ fontSize: "12px", color: "#a1a1aa", marginBottom: "4px" }}
               labelFormatter={(label) => new Date(label as string).toLocaleString()}
-              formatter={(value: number, name: string) => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              formatter={(value: any, name: any) => {
                 if (name === "avp" && typeof value === "number") return [value.toFixed(3) + " kPa", "Actual Vapor Pressure"];
                 if (name === "pressure" && typeof value === "number") return [value.toFixed(1) + " hPa", "Barometric Pressure"];
                 return [value, name];
