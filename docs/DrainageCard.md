@@ -264,11 +264,16 @@ This indicates **anoxia risk** — the soil's macropores are not draining, which
 | `hoursAbove70` | `number \| null` | Continuous hours above 70% (null if not in Phase 1) |
 | `vpd_kpa` | `number \| null` | Optional environmental input to correlate with capillary drying rate |
 | `alan_interference` | `boolean` | True if Botanical Light Pollution (ALAN) is detected |
-| `drainClass` | `"rapid" \| "moderate" \| "stagnant" \| "unknown"` | Backward-compatible classification |
+| `drainClass` | `"rapid" \| "moderate" \| "stagnant" \| "unknown"` | Backward-compatible classification (Current event) |
 | `retentionHours` | `number \| null` | Backward-compat: same as analyzeDrainage's retention |
 | `wateringEvents` | `number` | Count of detected events |
 | `lastWateringAt` | `string \| null` | ISO timestamp of most recent peak |
 | `peakMoisture` | `number \| null` | Peak moisture after last watering |
+| `isHistoricalRate` | `boolean` | True if the exported classification comes from a cached event |
+| `historicalDrainClass` | `"rapid" \| "moderate" \| "stagnant" \| "unknown"` | Legacy cached classification |
+| `cachedVGrav` | `number \| null` | Cached historical Phase 1/2 clearance rate |
+| `cachedVDry` | `number \| null` | Cached historical Phase 3 drying rate |
+| `cachedDrainClass` | `"rapid" \| "moderate" \| "stagnant" \| "unknown"` | Cached historical classification |
 
 ---
 
@@ -424,21 +429,29 @@ The [`ThreatAlertsPanel`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Proje
 
 ### drainClass Mapping Priority
 
-The piecewise engine uses this fallback chain for backward-compat:
+The piecewise engine evaluates drainage properties based on the **peak phase** reached during the watering event, ensuring light showers aren't unfairly classified as stagnant:
 
 ```
-1. V_grav available?
-   → > 3.0 %/hr     → "rapid"
-   → 0.8–3.0 %/hr   → "moderate"
-   → < 0.8 %/hr     → "stagnant"
+1. Peak ≥ 50% (Phase 1 / 2) -> Judged by V_grav or retention time
+   → V_grav available?
+      → > 3.0 %/hr     → "rapid"
+      → 0.8–3.0 %/hr   → "moderate"
+      → < 0.8 %/hr     → "stagnant"
+   → Else, retentionHours available?
+      → < 6h           → "rapid"
+      → 6–48h          → "moderate"
+      → > 48h          → "stagnant"
+   → Neither available → "unknown"
 
-2. retentionHours available?
-   → < 6h           → "rapid"
-   → 6–48h          → "moderate"
-   → > 48h          → "stagnant"
-
-3. Neither available  → "unknown"
+2. Peak < 50% (Phase 3) -> Judged purely by Capillary / ET rate
+   → V_dry available?
+      → > 0.5 %/hr     → "rapid" (Active ET)
+      → ≥ 0.1 %/hr     → "moderate" (Normal Dry)
+      → < 0.1 %/hr     → "stagnant" (Very Slow)
+   → Else             → "unknown"
 ```
+
+If the result is `"unknown"`, the system triggers the **Historical Caching Fallback**, iterating backward through up to 30 days of data to find the most recent completed watering event and exporting its class to `cachedDrainClass`.
 
 ---
 

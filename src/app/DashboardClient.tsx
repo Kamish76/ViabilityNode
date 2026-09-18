@@ -207,7 +207,12 @@ export function DashboardClient({
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
   const [currentDeployment, setCurrentDeployment] = useState<Deployment | null>(initialActiveDeployment);
   const [allDeployments, setAllDeployments] = useState<Deployment[]>(initialDeploymentHistory);
+  const [mounted, setMounted] = useState(false);
   const supabase = createClient();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Real-time subscription
   useEffect(() => {
@@ -346,7 +351,7 @@ export function DashboardClient({
                 <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900/50 border border-zinc-800 rounded-full backdrop-blur-md">
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
                   <span className="text-sm font-medium text-zinc-300">
-                    {formatDistanceToNow(new Date(latest.recorded_at), { addSuffix: true })}
+                    {mounted ? formatDistanceToNow(new Date(latest.recorded_at), { addSuffix: true }) : "..."}
                   </span>
                 </div>
               )}

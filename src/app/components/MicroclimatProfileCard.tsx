@@ -112,7 +112,7 @@ function MetricRow({
 }: {
   icon: React.ReactNode;
   title: string;
-  subtitle: string;
+  subtitle: React.ReactNode;
   value: string;
   unit: string;
   meta: { label: string; color: string; bg: string; border: string };
@@ -301,13 +301,38 @@ export function MicroclimatProfileCard({
               base += " — Capillary Plateau / Dry";
             }
             
-            const parts: string[] = [];
-            if (profile.v_grav !== null) parts.push(`V_grav: ${profile.v_grav.toFixed(2)} %/hr`);
-            if (profile.v_dry !== null) parts.push(`V_dry: ${profile.v_dry.toFixed(2)} %/hr`);
-            return parts.length > 0 ? `${base} · ${parts.join(' · ')}` : base;
+            const parts: React.ReactNode[] = [];
+            if (profile.v_grav !== null) parts.push(<span key="v_grav">V<sub>grav</sub>: {profile.v_grav.toFixed(2)} %/hr</span>);
+            if (profile.v_dry !== null) parts.push(<span key="v_dry">V<sub>dry</sub>: {profile.v_dry.toFixed(2)} %/hr</span>);
+
+            if (parts.length === 0) return base;
+
+            return (
+              <span className="flex items-center gap-1.5 flex-wrap">
+                <span>{base}</span>
+                {parts.map((part, i) => (
+                  <span key={i} className="flex items-center gap-1.5">
+                    <span className="text-zinc-600">·</span>
+                    {part}
+                  </span>
+                ))}
+              </span>
+            );
           })()}
-          value={profile.retention_hours !== null ? (profile.retention_hours < 1 ? `${Math.round(profile.retention_hours * 60)}m` : profile.retention_hours.toFixed(1)) : "—"}
-          unit={profile.retention_hours !== null ? (profile.retention_hours < 1 ? "" : "hours") : ""}
+          value={(() => {
+            if (profile.retention_hours === null) return "—";
+            if (profile.retention_hours < 1) return `${Math.round(profile.retention_hours * 60)}`;
+            if (profile.retention_hours < 24) return profile.retention_hours.toFixed(1);
+            const days = Math.floor(profile.retention_hours / 24);
+            const hrs = Math.round(profile.retention_hours % 24);
+            return `${days}d ${hrs}h`;
+          })()}
+          unit={(() => {
+            if (profile.retention_hours === null) return "";
+            if (profile.retention_hours < 1) return "min";
+            if (profile.retention_hours < 24) return "hours";
+            return ""; // The d/h units are inside the value string
+          })()}
           meta={DRAIN_META[profile.drain_class]}
         />
         <MetricRow
