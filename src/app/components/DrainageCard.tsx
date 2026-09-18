@@ -43,7 +43,8 @@ export type DrainCategory =
   | "waterlogged"     // Retention > 96h or no drop detected
   | "evaluating"      // Water hasn't drained enough to classify yet
   | "no-event"        // No watering event detected in window
-  | "insufficient";   // Not enough data
+  | "insufficient"    // Not enough data
+  | "optimal-dry";    // Plant reached safe low-moisture state
 
 export interface DrainageResult {
   category: DrainCategory;
@@ -61,6 +62,7 @@ export interface DrainageResult {
   lastWateringAt: string | null;     // ISO timestamp
   peakMoisture: number | null;       // Peak % after last watering
   peakDroppedTo: number | null;      // What it dropped to at the retention threshold
+  daysToLowest: number | null;       // Days it took to reach lowest moisture from peak (useful for succulents)
 
   // Downstream compat — mapped from category for MicroclimatProfileCard
   drainClass: "rapid" | "moderate" | "stagnant" | "unknown";
@@ -74,13 +76,14 @@ export interface DrainageResult {
 
 // ── Chart data helper (unchanged — 5-day thinned data for Recharts) ───────────
 
-function getRecentRawData(data: DrainageInput[]) {
+function getRecentRawData(data: DrainageInput[], plantType?: string | null) {
   const sorted = [...data].sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
 
-  // limit to last 5 days
-  const FIVE_DAYS = 5 * 24 * 60 * 60 * 1000;
+  // limit to last 5 days (or 30 for succulents)
+  const isSucculent = plantType === 'succulent' || plantType === 'cactus';
+  const WINDOW_MS = (isSucculent ? 30 : 5) * 24 * 60 * 60 * 1000;
   const latestTime = sorted.length > 0 ? new Date(sorted[sorted.length - 1].recorded_at).getTime() : Date.now();
-  const recentData = sorted.filter(d => latestTime - new Date(d.recorded_at).getTime() <= FIVE_DAYS);
+  const recentData = sorted.filter(d => latestTime - new Date(d.recorded_at).getTime() <= WINDOW_MS);
 
   // Thin out data slightly if there are too many points to keep Recharts performant
   if (recentData.length > 200) {
@@ -121,6 +124,7 @@ function makeInsufficient(msg: string, hint: string): DrainageResult {
     lastWateringAt: null,
     peakMoisture: null,
     peakDroppedTo: null,
+    daysToLowest: null,
     drainClass: "unknown",
     description: msg,
     plantHint: hint,
@@ -132,13 +136,16 @@ function makeInsufficient(msg: string, hint: string): DrainageResult {
 
 // ── Main analysis ─────────────────────────────────────────────────────────────
 
-export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
+export function analyzeDrainage(data: DrainageInput[], plantType?: string | null): DrainageResult {
   if (data.length < 6) {
     return makeInsufficient(
       "Need at least 6 calibrated soil moisture readings.",
       "Continue collecting data.",
     );
   }
+
+  const isSucculent = plantType === 'succulent' || plantType === 'cactus';
+  const WINDOW_MS = isSucculent ? 30 * 24 * 60 * 60 * 1000 : FIVE_DAYS_MS;
 
   // Sort ascending by time
   const sorted = [...data].sort(
@@ -152,29 +159,29 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
     return { ...d, moisture_pct: vals[Math.floor(vals.length / 2)] };
   });
 
-  // 2. Restrict to the last 5 days for all metrics
+  // 2. Restrict to the analysis window for all metrics
   const latestTime = new Date(filtered[filtered.length - 1].recorded_at).getTime();
-  const cutoff5d = latestTime - FIVE_DAYS_MS;
-  const window5d = filtered.filter(
-    (d) => new Date(d.recorded_at).getTime() >= cutoff5d,
+  const cutoff = latestTime - WINDOW_MS;
+  const windowData = filtered.filter(
+    (d) => new Date(d.recorded_at).getTime() >= cutoff,
   );
 
-  if (window5d.length < 2) {
+  if (windowData.length < 2) {
     return makeInsufficient(
-      "Not enough readings in the last 5 days.",
+      `Not enough readings in the last ${isSucculent ? '30' : '5'} days.`,
       "Check back once more data has been collected.",
     );
   }
 
   // 3. Basic observed metrics
-  const currentMoisture = window5d[window5d.length - 1].moisture_pct;
-  const moistureValues = window5d.map((d) => d.moisture_pct);
+  const currentMoisture = windowData[windowData.length - 1].moisture_pct;
+  const moistureValues = windowData.map((d) => d.moisture_pct);
   const moistureMin = Math.min(...moistureValues);
   const moistureMax = Math.max(...moistureValues);
 
   // 24h actual change: moisture[now] − moisture[~24h ago]
   const cutoff24h = latestTime - TWENTY_FOUR_H;
-  const reading24hAgo = window5d.find(
+  const reading24hAgo = windowData.find(
     (d) => new Date(d.recorded_at).getTime() >= cutoff24h,
   );
   const netChange24h = reading24hAgo
@@ -185,7 +192,7 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
   //    A watering event = the moisture jumps by ≥ SPIKE_THRESHOLD between
   //    two readings (or across a gap). We scan for the biggest positive delta.
   interface WateringEvent {
-    idx: number;          // Index in window5d where the spike was detected
+    idx: number;          // Index in windowData where the spike was detected
     peakIdx: number;      // Index of the peak moisture after the spike
     peakMoisture: number; // The peak value
     timestamp: string;    // When the peak occurred
@@ -193,21 +200,21 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
 
   const wateringEvents: WateringEvent[] = [];
 
-  for (let i = 1; i < window5d.length; i++) {
-    const delta = window5d[i].moisture_pct - window5d[i - 1].moisture_pct;
+  for (let i = 1; i < windowData.length; i++) {
+    const delta = windowData[i].moisture_pct - windowData[i - 1].moisture_pct;
     if (delta >= SPIKE_THRESHOLD) {
       // Found a spike — find the peak moisture in the next few hours
-      const spikeTime = new Date(window5d[i].recorded_at).getTime();
+      const spikeTime = new Date(windowData[i].recorded_at).getTime();
       const searchEnd = spikeTime + 4 * 60 * 60 * 1000; // Look up to 4h ahead
 
       let peakIdx = i;
-      let peakVal = window5d[i].moisture_pct;
+      let peakVal = windowData[i].moisture_pct;
 
-      for (let j = i; j < window5d.length; j++) {
-        const t = new Date(window5d[j].recorded_at).getTime();
+      for (let j = i; j < windowData.length; j++) {
+        const t = new Date(windowData[j].recorded_at).getTime();
         if (t > searchEnd) break;
-        if (window5d[j].moisture_pct > peakVal) {
-          peakVal = window5d[j].moisture_pct;
+        if (windowData[j].moisture_pct > peakVal) {
+          peakVal = windowData[j].moisture_pct;
           peakIdx = j;
         }
       }
@@ -219,7 +226,7 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
           idx: i,
           peakIdx,
           peakMoisture: peakVal,
-          timestamp: window5d[peakIdx].recorded_at,
+          timestamp: windowData[peakIdx].recorded_at,
         });
       }
     }
@@ -230,6 +237,7 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
   let lastWateringAt: string | null = null;
   let peakMoisture: number | null = null;
   let peakDroppedTo: number | null = null;
+  let daysToLowest: number | null = null;
 
   const lastEvent = wateringEvents.length > 0
     ? wateringEvents[wateringEvents.length - 1]
@@ -241,15 +249,28 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
     const retentionThreshold = peakMoisture - RETENTION_DROP;
 
     // Scan forward from the peak to find when moisture first drops below threshold
-    const peakTime = new Date(window5d[lastEvent.peakIdx].recorded_at).getTime();
+    const peakTime = new Date(windowData[lastEvent.peakIdx].recorded_at).getTime();
 
-    for (let j = lastEvent.peakIdx + 1; j < window5d.length; j++) {
-      if (window5d[j].moisture_pct <= retentionThreshold) {
-        const dropTime = new Date(window5d[j].recorded_at).getTime();
+    for (let j = lastEvent.peakIdx + 1; j < windowData.length; j++) {
+      if (windowData[j].moisture_pct <= retentionThreshold) {
+        const dropTime = new Date(windowData[j].recorded_at).getTime();
         retentionHours = +((dropTime - peakTime) / (1000 * 60 * 60)).toFixed(1);
-        peakDroppedTo = window5d[j].moisture_pct;
+        peakDroppedTo = windowData[j].moisture_pct;
         break;
       }
+    }
+
+    // For succulents: find time to reach the lowest moisture after peak
+    if (isSucculent) {
+      let minValAfterPeak = peakMoisture;
+      let minTimeAfterPeak = peakTime;
+      for (let j = lastEvent.peakIdx + 1; j < windowData.length; j++) {
+        if (windowData[j].moisture_pct < minValAfterPeak) {
+          minValAfterPeak = windowData[j].moisture_pct;
+          minTimeAfterPeak = new Date(windowData[j].recorded_at).getTime();
+        }
+      }
+      daysToLowest = +((minTimeAfterPeak - peakTime) / (1000 * 60 * 60 * 24)).toFixed(1);
     }
 
     // If we never crossed the threshold, the soil is still retaining
@@ -266,6 +287,7 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
     lastWateringAt,
     peakMoisture,
     peakDroppedTo,
+    daysToLowest,
   };
 
   // No watering events detected
@@ -273,22 +295,43 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
     return {
       ...shared,
       category: "no-event",
-      label: "No Watering Detected",
+      label: isSucculent ? "Optimal Dry Cycle" : "Dry Cycle",
       retentionHours: null,
       drainClass: "unknown",
-      description: `No watering events detected in the last 5 days. Moisture range: ${moistureMin.toFixed(0)}–${moistureMax.toFixed(0)}%.`,
-      plantHint: "Water the plant or wait for rain to measure soil retention.",
-      color: "#71717a",
-      textColor: "text-zinc-400",
-      bgColor: "bg-zinc-800/40",
+      description: isSucculent
+        ? `In drought phase. Moisture range: ${moistureMin.toFixed(0)}–${moistureMax.toFixed(0)}%.`
+        : `No watering events detected in the last 5 days. Moisture range: ${moistureMin.toFixed(0)}–${moistureMax.toFixed(0)}%.`,
+      plantHint: isSucculent
+        ? "Succulents thrive in extended dry periods. Water only if visually needed."
+        : "Water the plant or wait for rain to measure soil retention.",
+      color: isSucculent ? "#10b981" : "#71717a",
+      textColor: isSucculent ? "text-emerald-400" : "text-zinc-400",
+      bgColor: isSucculent ? "bg-emerald-950/20" : "bg-zinc-800/40",
     };
   }
 
   // Retention hasn't dropped yet — soil is still holding
   if (retentionHours === null) {
     const elapsedSincePeak = lastEvent
-      ? (latestTime - new Date(window5d[lastEvent.peakIdx].recorded_at).getTime()) / (1000 * 60 * 60)
+      ? (latestTime - new Date(windowData[lastEvent.peakIdx].recorded_at).getTime()) / (1000 * 60 * 60)
       : 0;
+
+    const isOptimalDry = isSucculent && (currentMoisture !== null && currentMoisture < 30);
+
+    if (isOptimalDry) {
+      return {
+        ...shared,
+        category: "optimal-dry",
+        label: "Optimal Dry State",
+        retentionHours: null,
+        drainClass: "rapid",
+        description: `Soil reached optimal dry conditions (${currentMoisture?.toFixed(0)}%) via capillary drainage.`,
+        plantHint: "Perfect moisture state for succulents. Water only when visually necessary.",
+        color: "#10b981",
+        textColor: "text-emerald-400",
+        bgColor: "bg-emerald-950/20",
+      };
+    }
 
     // If it's been >96 hours and still hasn't dropped, classify as waterlogged
     if (elapsedSincePeak > 96) {
@@ -339,14 +382,19 @@ export function analyzeDrainage(data: DrainageInput[]): DrainageResult {
 
   // We have a measured retention time
   if (retentionHours < 6) {
+    const isSucculent = plantType === 'succulent' || plantType === 'cactus';
+    const succulentDescription = daysToLowest !== null
+      ? `Water retained for ${retentionHours}h, taking ${daysToLowest}d to drop to its current low.`
+      : `Water retained for only ${retentionHours}h before dropping ${RETENTION_DROP}% from peak.`;
+
     return {
       ...shared,
       category: "fast-draining",
       label: "Fast Draining",
       retentionHours,
       drainClass: "rapid",
-      description: `Water retained for only ${retentionHours}h before dropping ${RETENTION_DROP}% from peak.`,
-      plantHint: "Best for: Succulents, cacti, herbs, lavender. May need frequent watering for others.",
+      description: isSucculent ? succulentDescription : `Water retained for only ${retentionHours}h before dropping ${RETENTION_DROP}% from peak.`,
+      plantHint: isSucculent ? "Excellent drainage for succulents." : "Best for: Succulents, cacti, herbs, lavender. May need frequent watering for others.",
       color: "#10b981",
       textColor: "text-emerald-400",
       bgColor: "bg-emerald-950/20",
@@ -608,10 +656,10 @@ function PiecewiseVelocities({
 
 // ── Main Card Component ───────────────────────────────────────────────────────
 
-export function DrainageCard({ data }: { data: DrainageInput[] }) {
-  const result = analyzeDrainage(data);
+export function DrainageCard({ data, plantType }: { data: DrainageInput[], plantType?: string | null }) {
+  const result = analyzeDrainage(data, plantType);
   const piecewise = analyzePiecewiseDrainage(data);
-  const chartData = getRecentRawData(data);
+  const chartData = getRecentRawData(data, plantType);
 
   // Format retention time as human-readable
   const retentionDisplay = (() => {
@@ -627,6 +675,7 @@ export function DrainageCard({ data }: { data: DrainageInput[] }) {
     <div
       className={`rounded-3xl border backdrop-blur-xl shadow-2xl overflow-hidden
         ${result.category === "fast-draining"  ? "border-emerald-500/25" :
+          result.category === "optimal-dry"    ? "border-emerald-500/25" :
           result.category === "well-draining"  ? "border-blue-500/25" :
           result.category === "slow-draining"  ? "border-amber-500/25" :
           result.category === "waterlogged"    ? "border-red-500/25" :
@@ -669,7 +718,16 @@ export function DrainageCard({ data }: { data: DrainageInput[] }) {
                 <p className="text-xs text-zinc-500">Water Retention</p>
               </div>
               <div className="flex items-baseline gap-2">
-                {retentionDisplay !== null ? (
+                {result.category === "optimal-dry" ? (
+                  <>
+                    <span className="text-2xl font-semibold" style={{ color: result.color }}>
+                      Safely dry
+                    </span>
+                    <span className="text-sm text-zinc-400">
+                      capillary phase stabilized
+                    </span>
+                  </>
+                ) : retentionDisplay !== null ? (
                   <>
                     <span className="text-4xl font-bold text-white">
                       {retentionDisplay}
@@ -693,14 +751,17 @@ export function DrainageCard({ data }: { data: DrainageInput[] }) {
                   </>
                 )}
               </div>
-              {result.peakMoisture !== null && (
-                <p className="text-xs text-zinc-500 mt-1">
-                  Peak: {result.peakMoisture.toFixed(1)}%
-                  {result.peakDroppedTo !== null && (
-                    <> → {result.peakDroppedTo.toFixed(1)}%</>
-                  )}
-                </p>
-              )}
+                {result.peakMoisture !== null && (
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Peak: {result.peakMoisture.toFixed(1)}%
+                    {result.peakDroppedTo !== null && (
+                      <> → {result.peakDroppedTo.toFixed(1)}%</>
+                    )}
+                    {result.daysToLowest !== null && (
+                      <span className="block mt-0.5 text-zinc-400">Reached lowest in {result.daysToLowest}d</span>
+                    )}
+                  </p>
+                )}
             </div>
           </div>
         )}
@@ -732,7 +793,9 @@ export function DrainageCard({ data }: { data: DrainageInput[] }) {
             <div className="rounded-xl border border-zinc-800/60 bg-zinc-800/20 px-3 py-2.5">
               <div className="flex items-center gap-1.5 mb-1">
                 <Droplets className="w-3 h-3 text-cyan-400" />
-                <span className="text-[10px] uppercase tracking-wider text-zinc-500">Waterings (5d)</span>
+                <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Waterings ({plantType === 'succulent' || plantType === 'cactus' ? '30d' : '5d'})
+                </span>
               </div>
               <p className="text-sm font-semibold text-cyan-400">
                 {result.wateringEvents}

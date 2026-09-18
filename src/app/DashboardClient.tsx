@@ -57,14 +57,9 @@ export interface BatterySnapshot {
   battery_pct: number;
 }
 
-interface CalibrationConfig {
-  dryLimit: number;   // ADC reading in air (≈ 1900)
-  wetLimit: number;   // ADC reading fully submerged (≈ 1100)
-}
-
-const DEFAULT_CALIBRATION: CalibrationConfig = {
-  dryLimit: 1900,  // Absolute dry (open air reading)
-  wetLimit: 1000,   // Absolute wet (submerged in water reading)
+const HARDCODED_CALIBRATION = {
+  dryLimit: 1920,
+  wetLimit: 880,
 };
 
 
@@ -89,10 +84,8 @@ function calculateVPD(tempC: number, humidityRH: number, lux: number = 0): numbe
   return Math.max(0, eSatLeaf - eActAir);
 }
 
-function calculateMoisturePct(
-  rawADC: number,
-  { dryLimit, wetLimit }: CalibrationConfig
-): number {
+function calculateMoisturePct(rawADC: number): number {
+  const { dryLimit, wetLimit } = HARDCODED_CALIBRATION;
   if (dryLimit === wetLimit) return 0;
   const pct = ((dryLimit - rawADC) / (dryLimit - wetLimit)) * 100;
   return Math.max(0, Math.min(100, pct));
@@ -170,198 +163,6 @@ function estimateBatteryDays(
   return currentPct / dropPerDay;
 }
 
-// ─── Calibration Modal ────────────────────────────────────────────────────────
-
-function CalibrationModal({
-  calibration,
-  liveRaw,
-  onSave,
-  onClose,
-}: {
-  calibration: CalibrationConfig;
-  liveRaw: number | null;
-  onSave: (cfg: CalibrationConfig) => void;
-  onClose: () => void;
-}) {
-  const [dry, setDry] = useState(calibration.dryLimit);
-  const [wet, setWet] = useState(calibration.wetLimit);
-
-  const preview =
-    liveRaw !== null
-      ? calculateMoisturePct(liveRaw, { dryLimit: dry, wetLimit: wet })
-      : null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      {/* Modal */}
-      <div className="relative w-full max-w-md rounded-3xl border border-zinc-700/80 bg-zinc-900 shadow-2xl overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-amber-500/10 rounded-xl border border-amber-500/20">
-              <FlaskConical className="w-5 h-5 text-amber-400" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold text-white">
-                Soil Sensor Calibration
-              </h2>
-              <p className="text-xs text-zinc-500 mt-0.5">
-                Debug mode — values stored in browser localStorage
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="px-6 py-5 space-y-6">
-          {/* Debug badge */}
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-            <p className="text-xs text-amber-300 leading-snug">
-              Prototype calibration — capture real wet/dry ADC readings from the
-              sensor before finalising these values.
-            </p>
-          </div>
-
-          {/* Dry Limit */}
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <label className="text-sm font-medium text-zinc-300">
-                Dry Limit{" "}
-                <span className="text-zinc-500 font-normal">(Air / Empty)</span>
-              </label>
-              <span className="text-sm font-mono font-semibold text-zinc-100">
-                {dry}
-              </span>
-            </div>
-            <input
-              type="range"
-              min={1500}
-              max={2100}
-              step={5}
-              value={dry}
-              onChange={(e) => setDry(Number(e.target.value))}
-              className="w-full accent-amber-400"
-            />
-            <div className="flex justify-between text-xs text-zinc-600">
-              <span>1500</span>
-              <span>2100</span>
-            </div>
-            <input
-              type="number"
-              value={dry}
-              onChange={(e) => setDry(Number(e.target.value))}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-white focus:outline-none focus:border-amber-500 transition-colors"
-            />
-          </div>
-
-          {/* Wet Limit */}
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <label className="text-sm font-medium text-zinc-300">
-                Wet Limit{" "}
-                <span className="text-zinc-500 font-normal">
-                  (Submerged in Water)
-                </span>
-              </label>
-              <span className="text-sm font-mono font-semibold text-zinc-100">
-                {wet}
-              </span>
-            </div>
-            <input
-              type="range"
-              min={800}
-              max={1500}
-              step={5}
-              value={wet}
-              onChange={(e) => setWet(Number(e.target.value))}
-              className="w-full accent-emerald-400"
-            />
-            <div className="flex justify-between text-xs text-zinc-600">
-              <span>800</span>
-              <span>1500</span>
-            </div>
-            <input
-              type="number"
-              value={wet}
-              onChange={(e) => setWet(Number(e.target.value))}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-white focus:outline-none focus:border-emerald-500 transition-colors"
-            />
-          </div>
-
-          {/* Live Preview */}
-          {liveRaw !== null && (
-            <div className="rounded-2xl bg-zinc-800/60 border border-zinc-700/50 px-4 py-4">
-              <p className="text-xs text-zinc-500 mb-3 font-medium uppercase tracking-wider">
-                Live Preview
-              </p>
-              <div className="flex items-end justify-between">
-                <div>
-                  <p className="text-xs text-zinc-500 mb-1">
-                    Raw ADC: <span className="text-zinc-300 font-mono">{liveRaw}</span>
-                  </p>
-                  <p className="text-3xl font-bold text-white">
-                    {preview !== null ? `${preview.toFixed(1)}%` : "—"}
-                  </p>
-                  <p className="text-xs text-zinc-500 mt-1">Volumetric Water Content</p>
-                </div>
-                {/* Mini moisture bar */}
-                <div className="w-8 h-24 bg-zinc-700 rounded-full overflow-hidden flex items-end">
-                  <div
-                    className="w-full rounded-full transition-all duration-500"
-                    style={{
-                      height: `${preview ?? 0}%`,
-                      background: `hsl(${140 + (preview ?? 0) * 0.8}, 70%, 45%)`,
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Reset to defaults notice */}
-          <p className="text-xs text-zinc-600 text-center">
-            Default: Dry={DEFAULT_CALIBRATION.dryLimit}, Wet={DEFAULT_CALIBRATION.wetLimit}
-          </p>
-        </div>
-
-        {/* Footer actions */}
-        <div className="px-6 py-4 border-t border-zinc-800 flex gap-3">
-          <button
-            onClick={() => {
-              setDry(DEFAULT_CALIBRATION.dryLimit);
-              setWet(DEFAULT_CALIBRATION.wetLimit);
-            }}
-            className="flex-1 px-4 py-2.5 text-sm font-medium text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-xl transition-colors"
-          >
-            Reset Defaults
-          </button>
-          <button
-            onClick={() => {
-              onSave({ dryLimit: dry, wetLimit: wet });
-              onClose();
-            }}
-            className="flex-1 px-4 py-2.5 text-sm font-semibold text-black bg-emerald-400 hover:bg-emerald-300 rounded-xl transition-colors"
-          >
-            Save Calibration
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 function CopyLogsButton({ logs }: { logs: TelemetryData[] }) {
@@ -395,7 +196,6 @@ export function DashboardClient({
   activeDeployment: initialActiveDeployment,
   deploymentHistory: initialDeploymentHistory,
   dailySummary,
-  initialDeviceSettings,
   microclimateProfile,
 }: {
   initialLogs: TelemetryData[];
@@ -408,16 +208,9 @@ export function DashboardClient({
   activeDeployment: Deployment | null;
   deploymentHistory: Deployment[];
   dailySummary: DailySummaryData;
-  initialDeviceSettings?: { dry_limit: number; wet_limit: number; plant_type?: string; placement_type?: string } | null;
   microclimateProfile: PrecalculatedProfile | null;
 }) {
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
-  const [calibration, setCalibration] = useState<CalibrationConfig>(
-    initialDeviceSettings 
-      ? { dryLimit: initialDeviceSettings.dry_limit, wetLimit: initialDeviceSettings.wet_limit }
-      : DEFAULT_CALIBRATION
-  );
-  const [showCalibration, setShowCalibration] = useState(false);
   const [currentDeployment, setCurrentDeployment] = useState<Deployment | null>(initialActiveDeployment);
   const [allDeployments, setAllDeployments] = useState<Deployment[]>(initialDeploymentHistory);
   const supabase = createClient();
@@ -446,27 +239,9 @@ export function DashboardClient({
 
   const latest = logs.length > 0 ? logs[0] : null;
 
-  const handleSaveCalibration = useCallback(async (cfg: CalibrationConfig) => {
-    setCalibration(cfg);
-    if (latest?.device_id) {
-      const { error } = await supabase
-        .from("device_settings")
-        .upsert({
-          device_id: latest.device_id,
-          dry_limit: cfg.dryLimit,
-          wet_limit: cfg.wetLimit,
-        });
-      if (error) {
-        console.error("Failed to save device settings:", error);
-      }
-    }
-  }, [supabase, latest]);
-
-
-
   // Derived values
   const moisturePct = latest
-    ? calculateMoisturePct(latest.soil_moisture_raw, calibration)
+    ? calculateMoisturePct(latest.soil_moisture_raw)
     : null;
 
   const daysRemaining =
@@ -479,7 +254,7 @@ export function DashboardClient({
   // Phase 2.2: convert raw moisture history to calibrated % for drainage analysis
   const drainageData: DrainageInput[] = moistureHistory.map((r) => ({
     recorded_at: r.recorded_at,
-    moisture_pct: calculateMoisturePct(r.soil_moisture_raw, calibration),
+    moisture_pct: calculateMoisturePct(r.soil_moisture_raw),
     raw: r.soil_moisture_raw,
   }));
 
@@ -508,18 +283,31 @@ export function DashboardClient({
   // Calibrated moisture for the TrialProgressCard
   const calibratedMoistureHistory = moistureHistory.map((r) => ({
     recorded_at: r.recorded_at,
-    moisture_pct: calculateMoisturePct(r.soil_moisture_raw, calibration),
+    moisture_pct: calculateMoisturePct(r.soil_moisture_raw),
   }));
 
+  // ── 5. Historical filtering for Sitter Mode and Microclimate Profile ──
+  // Ensures findings only rely on complete past days, preventing partial/inaccurate intraday false alarms.
+  const endOfYesterdayMs = new Date().setHours(0, 0, 0, 0);
+
+  const historicalDrainageData = drainageData.filter(d => new Date(d.recorded_at).getTime() < endOfYesterdayMs);
+  const historicalVpd = vpdHistory7.filter(d => new Date(d.recorded_at).getTime() < endOfYesterdayMs);
+  const historicalDli = dliHistory.filter(d => new Date(d.day).getTime() < endOfYesterdayMs);
+  const historicalLogs = logs.filter(l => new Date(l.recorded_at).getTime() < endOfYesterdayMs);
+  
+  const historicalLatestMoisture = historicalDrainageData.length > 0 
+    ? historicalDrainageData[historicalDrainageData.length - 1].moisture_pct 
+    : null;
+
   // Phase 4.5: Piecewise segmented drainage analysis
-  const piecewiseResult = analyzePiecewiseDrainage(drainageData);
+  const piecewiseResult = analyzePiecewiseDrainage(historicalDrainageData);
 
   // Calculate overall viability status
   const currentPlantType = currentDeployment?.plant_type || null;
   const isPot = placementType === "pot";
-  const rot = evalRotWarning(drainageData, vpdHistory7, moisturePct, isPot, currentPlantType, piecewiseResult);
-  const dehy = evalDehydrationWarning(drainageData, vpdHistory7, moisturePct, isPot, currentPlantType, piecewiseResult);
-  const growth = evalGrowthOptimization(dliHistory, drainageData, vpdHistory7, currentPlantType);
+  const rot = evalRotWarning(historicalDrainageData, historicalVpd, historicalLatestMoisture, isPot, currentPlantType, piecewiseResult);
+  const dehy = evalDehydrationWarning(historicalDrainageData, historicalVpd, historicalLatestMoisture, isPot, currentPlantType, piecewiseResult);
+  const growth = evalGrowthOptimization(historicalDli, historicalDrainageData, historicalVpd, currentPlantType);
 
   const hasActiveThreat = rot.status === "active" || dehy.status === "active";
   const hasRisk = rot.status === "at-risk" || dehy.status === "at-risk";
@@ -534,16 +322,6 @@ export function DashboardClient({
         <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-emerald-900/20 blur-[120px]" />
         <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-emerald-900/20 blur-[120px]" />
       </div>
-
-      {/* Calibration Modal */}
-      {showCalibration && (
-        <CalibrationModal
-          calibration={calibration}
-          liveRaw={latest?.soil_moisture_raw ?? null}
-          onSave={handleSaveCalibration}
-          onClose={() => setShowCalibration(false)}
-        />
-      )}
 
       {/* Layout Wrapper */}
       <div className="w-full max-w-[1920px] mx-auto flex flex-col lg:flex-row items-start gap-4 lg:gap-8 px-4 sm:px-6 lg:px-8 2xl:px-12">
@@ -569,16 +347,6 @@ export function DashboardClient({
             </div>
 
             <div className="flex items-center gap-3">
-              {/* Calibration button */}
-              <button
-                id="calibration-modal-trigger"
-                onClick={() => setShowCalibration(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 rounded-full text-sm font-medium transition-all duration-200"
-              >
-                <Settings2 className="w-4 h-4" />
-                Calibrate Sensor
-              </button>
-
               {latest && (
                 <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900/50 border border-zinc-800 rounded-full backdrop-blur-md">
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -601,21 +369,22 @@ export function DashboardClient({
           ) : (
             <div className="space-y-16 lg:space-y-24">
               <div className="space-y-6">
+                {/* Microclimate Profile Summary */}
                 <SummaryDashboard
                   data={dailySummary}
                   viabilityStatus={viabilityStatus}
                   plantType={currentPlantType}
-                  drainageData={drainageData}
+                  drainageData={historicalDrainageData}
                   piecewiseResult={piecewiseResult}
                 />
 
                 {/* Sitter Mode: Active Threat Alerts */}
                 <ThreatAlertsPanel
-                  drainageData={drainageData}
-                  vpdHistory30={vpdHistory7}
-                  dliHistory={dliHistory}
-                  latestMoisture={moisturePct}
-                  logs={logs}
+                  drainageData={historicalDrainageData}
+                  vpdHistory30={historicalVpd}
+                  dliHistory={historicalDli}
+                  latestMoisture={historicalLatestMoisture}
+                  logs={historicalLogs}
                   placementType={placementType}
                   plantType={currentDeployment?.plant_type || null}
                   piecewise={piecewiseResult}
@@ -713,24 +482,7 @@ export function DashboardClient({
                 </div>
               </div>
 
-              {/* Calibration info strip */}
-              <div className="flex items-center justify-between px-5 py-3 rounded-2xl bg-zinc-900/60 border border-zinc-800/60 text-xs text-zinc-500">
-                <div className="flex items-center gap-2">
-                  <FlaskConical className="w-3.5 h-3.5 text-amber-500/70" />
-                  <span>
-                    Soil calibration:{" "}
-                    <span className="text-zinc-400 font-mono">
-                      Dry={calibration.dryLimit} / Wet={calibration.wetLimit}
-                    </span>
-                  </span>
-                </div>
-                <button
-                  onClick={() => setShowCalibration(true)}
-                  className="text-amber-500/70 hover:text-amber-400 transition-colors underline underline-offset-2"
-                >
-                  Adjust
-                </button>
-              </div>
+
 
               {/* ════════════════════════════════════════
                  PHASE 2 — Biophysical Analytics
@@ -760,7 +512,7 @@ export function DashboardClient({
                   <VPDChart data={vpdHistory} rollingAvg={vpdRollingAvg} />
 
                   {/* 2.2 — Soil Drainage Velocity */}
-                  <DrainageCard data={drainageData} />
+                  <DrainageCard data={drainageData} plantType={currentPlantType} />
                 </div>
 
                 {/* 2.4 — Atmospheric Correlation */}
@@ -792,7 +544,7 @@ export function DashboardClient({
                     </thead>
                     <tbody className="divide-y divide-zinc-800/50">
                       {logs.map((log) => {
-                        const mPct = calculateMoisturePct(log.soil_moisture_raw, calibration);
+                        const mPct = calculateMoisturePct(log.soil_moisture_raw);
                         return (
                           <tr key={log.id} className="hover:bg-zinc-800/30 transition-colors">
                             <td className="px-6 py-3 text-zinc-300 whitespace-nowrap">
