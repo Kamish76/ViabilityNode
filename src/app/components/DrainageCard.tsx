@@ -36,21 +36,35 @@ import {
   analyzeDrainage
 } from "@/lib/drainageAnalysis";
 
-// ── Chart data helper (unchanged — 5-day thinned data for Recharts) ───────────
+// ── Chart data helper (unchanged — 7-day thinned data for Recharts) ───────────
 
+/**
+ * Prepares and thins soil moisture telemetry data for the Recharts component.
+ * It enforces a strict 7-day visual window to ensure the graph aligns with the 
+ * 'Observed Range (7d)' UI metrics, regardless of the underlying analysis window.
+ * 
+ * @param data - The raw drainage input data
+ * @param plantType - The type of plant (unused for visual windowing, but kept for signature compatibility)
+ */
 function getRecentRawData(data: DrainageInput[], plantType?: string | null) {
   const sorted = [...data].sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
 
-  // limit to last 5 days (or 30 for succulents)
-  const isSucculent = plantType === 'succulent' || plantType === 'cactus';
-  const WINDOW_MS = (isSucculent ? 30 : 5) * 24 * 60 * 60 * 1000;
+  // Limit to last 7 days for the visual chart, regardless of plant type
+  const WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
   const latestTime = sorted.length > 0 ? new Date(sorted[sorted.length - 1].recorded_at).getTime() : Date.now();
   const recentData = sorted.filter(d => latestTime - new Date(d.recorded_at).getTime() <= WINDOW_MS);
 
   // Thin out data slightly if there are too many points to keep Recharts performant
   if (recentData.length > 200) {
     const thinFactor = Math.ceil(recentData.length / 200);
-    return recentData.filter((_, i) => i % thinFactor === 0).map(d => ({
+    const thinned = recentData.filter((_, i) => i % thinFactor === 0);
+    
+    // Ensure the absolute latest data point is always included so the graph reaches "Now"
+    if (thinned[thinned.length - 1] !== recentData[recentData.length - 1]) {
+      thinned.push(recentData[recentData.length - 1]);
+    }
+
+    return thinned.map(d => ({
       time: new Date(d.recorded_at).getTime(),
       moisture: d.moisture_pct,
       raw: d.raw
@@ -86,7 +100,7 @@ function MoistureRangeBar({
   return (
     <div className="space-y-1.5">
       <div className="flex justify-between text-[10px] uppercase tracking-wider text-zinc-500">
-        <span>Observed Range (5d)</span>
+        <span>Observed Range (7d)</span>
         <span>{min.toFixed(0)}% – {max.toFixed(0)}%</span>
       </div>
       <div className="relative h-3 bg-zinc-800 rounded-full overflow-hidden">
@@ -435,7 +449,7 @@ export function DrainageCard({ data, plantType, precalculatedResult, precalculat
               <div className="flex items-center gap-1.5 mb-1">
                 <Droplets className="w-3 h-3 text-cyan-400" />
                 <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  Waterings ({plantType === 'succulent' || plantType === 'cactus' ? '30d' : '5d'})
+                  Waterings ({plantType === 'succulent' || plantType === 'cactus' ? '30d' : '7d'})
                 </span>
               </div>
               <p className="text-sm font-semibold text-cyan-400">
@@ -487,7 +501,7 @@ export function DrainageCard({ data, plantType, precalculatedResult, precalculat
           </div>
         )}
 
-        {/* 5-Day Moisture Chart */}
+        {/* 7-Day Moisture Chart */}
         {chartData.length > 1 && (
           <div className="pt-2 pb-1 h-28">
             <ResponsiveContainer width="100%" height="100%">

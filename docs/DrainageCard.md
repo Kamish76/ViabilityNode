@@ -31,7 +31,7 @@ graph TD
     D --> G["PiecewiseDrainageResult<br/>(vGrav, vDry, phases)"]
     F --> I["DrainageCard Component"]
     G --> I
-    I --> H["Recharts AreaChart<br/>(5-day thinned data)"]
+    I --> H["Recharts AreaChart<br/>(7-day thinned data)"]
     F --> K["Downstream: ThreatAlertsPanel &<br/>MicroclimatProfileCard"]
 ```
 
@@ -63,7 +63,7 @@ $$ \text{moisture\_pct} = \left( \frac{\text{ADC}_{\text{dry}} - \text{ADC}_{\te
 This logic is centralized in `src/lib/sensorUtils.ts` via the `calculateMoisturePct` function. Documenting this calibration transformation ensures component inputs align with raw micro-controller payloads.
 
 > [!IMPORTANT]
-> The module requires **at least 6 readings** and **at least 2 readings within the last 5 days** to produce any result other than `"insufficient"`.
+> The module requires **at least 6 readings** and **at least 2 readings within the last 7 days** (or 30 days for succulents) to produce any result other than `"insufficient"`.
 
 ---
 
@@ -71,7 +71,7 @@ This logic is centralized in `src/lib/sensorUtils.ts` via the `calculateMoisture
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `FIVE_DAYS_MS` | `432,000,000` ms | Analysis observation window |
+| `SEVEN_DAYS_MS` | `604,800,000` ms | Analysis observation window |
 | `TWENTY_FOUR_H` | `86,400,000` ms | 24h net-change lookback |
 | `SPIKE_THRESHOLD` | `10` (%) | Min % jump between consecutive readings to count as a watering event |
 | `RETENTION_DROP` | `10` (%) | Absolute % drop from peak to measure retention time |
@@ -93,7 +93,7 @@ graph TD
     A["Input: DrainageInput[]"] --> B["Guard: < 6 readings?<br/>→ insufficient"]
     B --> C["Deduplicate (Δt ≤ 1s) &<br/>Sort ascending by time"]
     C --> D["Median Filter (window=3)<br/>Strip ADC glitches"]
-    D --> E["Trim to 5-day window"]
+    D --> E["Trim to 7-day window"]
     E --> F["Guard: < 2 in window?<br/>→ insufficient"]
     F --> G["Compute basic metrics<br/>(current, min, max, 24h change)"]
     G --> H["Detect watering events<br/>(spike ≥ 10%)"]
@@ -150,8 +150,8 @@ The algorithm scans forward through post-peak readings:
 | **`waterlogged`** | retention > 96h **or** elapsed > 96h without drop | Measured or null | `"stagnant"` |
 | **`evaluating` (Absorbing)** | elapsed ≤ 4h, no threshold cross | null | `"unknown"` |
 | **`evaluating` (Still Retaining)** | 4h < elapsed ≤ 96h, no threshold cross | null | `"unknown"` |
-| **`no-event`** | No watering events detected in 5 days | null | `"unknown"` |
-| **`insufficient`** | < 6 readings or < 2 in 5-day window | null | `"unknown"` |
+| **`no-event`** | No watering events detected in 7 days | null | `"unknown"` |
+| **`insufficient`** | < 6 readings or < 2 in 7-day window | null | `"unknown"` |
 
 ### 5.3 Output: [`DrainageResult`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/lib/drainageAnalysis.ts)
 
@@ -161,9 +161,9 @@ The algorithm scans forward through post-peak readings:
 | `label` | `string` | Human-readable label for the category |
 | `retentionHours` | `number \| null` | Hours from peak to 10% absolute drop. Null if not yet measured. |
 | `currentMoisture` | `number \| null` | Latest calibrated reading in the window |
-| `moistureMin` / `moistureMax` | `number` | Observed range over 5-day window |
+| `moistureMin` / `moistureMax` | `number` | Observed range over 7-day window |
 | `netChange24h` | `number \| null` | `moisture[now] − moisture[24h ago]` — actual signed change |
-| `wateringEvents` | `number` | Count of detected spikes in 5-day window |
+| `wateringEvents` | `number` | Count of detected spikes in 7-day window |
 | `lastWateringAt` | `string \| null` | ISO timestamp of the most recent peak |
 | `peakMoisture` | `number \| null` | Peak % after the most recent watering |
 | `peakDroppedTo` | `number \| null` | What moisture dropped to at the retention threshold |
@@ -311,7 +311,7 @@ for each consecutive pair (i-1, i):
 Key behaviors:
 - The **4-hour forward search** accounts for gradual water absorption after application
 - **Deduplication** ensures the same absorption curve doesn't produce multiple events
-- Multiple distinct waterings within the 5-day window are counted and displayed
+- Multiple distinct waterings within the 7-day window are counted and displayed
 
 ---
 
@@ -334,19 +334,19 @@ DrainageCard & MicroclimatProfileCard
 │   └── Phase 3 (Capillary ET) Average Rate
 ```
 │   ├── 24h Change (netChange24h with trend icon)
-│   └── Watering Events (count in 5-day window)
+│   └── Watering Events (count in 7-day window)
 ├── PhaseIndicatorBar (3-phase progress bar)
 ├── PiecewiseVelocities (V_grav + V_dry cards)
 ├── MoistureRangeBar (observed min/max range bar)
 ├── Last Watering Info (timestamp + peak→drop)
-├── 5-Day Moisture Chart (Recharts AreaChart)
+├── 7-Day Moisture Chart (Recharts AreaChart)
 ├── Description (dynamic text from result.description)
 └── Plant Hint (actionable recommendation callout)
 ```
 
 ### 8.2 [`MoistureRangeBar`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/DrainageCard.tsx#L402-L451)
 
-Visualizes the current moisture position within the 5-day observed min/max range:
+Visualizes the current moisture position within the 7-day observed min/max range:
 
 ```
 position = ((current − min) / (max − min)) × 100   [clamped 0–100%]
@@ -380,12 +380,12 @@ Two-column grid displaying V<sub>grav</sub> and V<sub>dry</sub> with:
 - Phase duration context ("Phase 1 cleared in X.Xh")
 - Macropore failure alert (red border + warning icon)
 
-### 8.5 Chart: 5-Day Moisture History
+### 8.5 Chart: 7-Day Moisture History
 
 [`getRecentRawData()`](file:///Users/Kamish/Desktop/JEBZ%20DEVVV/Main%20Projects/Plant%20monitoring%20system%20projecct%20lols/ViabilityNode/src/app/components/DrainageCard.tsx#L77-L100) prepares chart data:
 
-- Filters to last 5 days
-- **Thins** to max 200 points if needed (keeps every Nth point for Recharts performance)
+- Filters to strictly last 7 days (regardless of plant type)
+- **Thins** to max 200 points if needed (keeps every Nth point for Recharts performance, always keeping the latest point)
 - Outputs `{ time: number, moisture: number, raw: number }[]`
 
 Chart features:
@@ -479,7 +479,7 @@ If the result is `"unknown"`, the system triggers the **Historical Caching Fallb
 | Narrow Sensor Dynamic Range | A hardcoded `SPIKE_THRESHOLD = 10%` may fail or false-trigger at 1–2 ADC counts per %. A dynamic spike threshold or raw ADC delta triggers tailored to sensor bit-resolution should be used. |
 | Packet Burst Duplicates | Millisecond burst duplicates (Δt ≤ 1s) are deduplicated before median filtering. |
 | ADC glitch (single-sample noise) | Removed by median filter before any calculation |
-| > 200 data points in 5-day chart | Thinned by sampling every Nth point to keep Recharts under 200 points |
+| > 200 data points in 7-day chart | Thinned by sampling every Nth point to keep Recharts under 200 points |
 
 ---
 

@@ -132,13 +132,13 @@ export default async function DashboardPage() {
       .eq("device_id", deviceId)
       .gte("recorded_at", sevenDaysAgo.toISOString())
       .not("vpd_kpa", "is", null)
-      .order("recorded_at", { ascending: true })
+      .order("recorded_at", { ascending: false })
       .limit(5000);
 
     if (vpdError) {
       console.error("Failed to fetch vpd from telemetry_with_vpd:", vpdError.message);
     } else {
-      vpdHistory = (vpdRows ?? []) as VPDDataPoint[];
+      vpdHistory = ((vpdRows ?? []) as VPDDataPoint[]).reverse();
     }
   }
 
@@ -163,10 +163,10 @@ export default async function DashboardPage() {
       .select("recorded_at, soil_moisture_raw")
       .eq("device_id", deviceId)
       .gte("recorded_at", thirtyDaysAgo.toISOString())
-      .order("recorded_at", { ascending: true })
+      .order("recorded_at", { ascending: false })
       .limit(5000);
 
-    moistureHistory = (moistureRows ?? []).map((r) => ({
+    moistureHistory = (moistureRows ?? []).reverse().map((r) => ({
       recorded_at: r.recorded_at as string,
       soil_moisture_raw: r.soil_moisture_raw as number,
     }));
