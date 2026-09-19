@@ -53,7 +53,7 @@ export default async function DashboardPage() {
       humidity: summaryData[0].avg_humidity_rh,
       vpd: summaryData[0].avg_vpd_kpa,
       light: summaryData[0].avg_illuminance_lux,
-      moistureRaw: summaryData[0].avg_soil_moisture_raw,
+      moisturePct: summaryData[0].avg_moisture_pct,
     };
     if (summaryData.length > 1) {
       previousSummary = {
@@ -61,7 +61,7 @@ export default async function DashboardPage() {
         humidity: summaryData[1].avg_humidity_rh,
         vpd: summaryData[1].avg_vpd_kpa,
         light: summaryData[1].avg_illuminance_lux,
-        moistureRaw: summaryData[1].avg_soil_moisture_raw,
+        moisturePct: summaryData[1].avg_moisture_pct,
       };
     }
   }
@@ -180,17 +180,8 @@ export default async function DashboardPage() {
   let deviceSettings = null;
 
   if (deviceId) {
-    // Fetch device settings
-    const { data: settingsData } = await supabaseAdmin
-      .from("device_settings")
-      .select("dry_limit, wet_limit, plant_type, placement_type")
-      .eq("device_id", deviceId)
-      .single();
+    // Dynamic device settings removed. Hardcoded calibration (1920/880) is used everywhere.
     
-    if (settingsData) {
-      deviceSettings = settingsData;
-    }
-
     // Fetch all deployments for this device (active first)
     const { data: deploymentRows, error: deploymentError } = await supabaseAdmin
       .from("node_deployments")

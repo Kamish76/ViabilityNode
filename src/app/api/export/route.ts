@@ -15,7 +15,7 @@ interface DaySummary {
   humidity: number;
   vpd: number;
   light: number;
-  moisture_raw: number;
+  moisture_pct: number;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -31,12 +31,16 @@ function computeDayAvg(rows: Record<string, unknown>[]): DaySummary | null {
     const eSat = 0.61078 * Math.exp((17.27 * (r.temperature_c as number)) / ((r.temperature_c as number) + 237.3));
     vpd += eSat * (1 - (r.humidity_rh as number) / 100);
   }
+  const avgMoistureRaw = moisture / rows.length;
+  let moisturePct = ((1920.0 - avgMoistureRaw) / (1920.0 - 880.0)) * 100.0;
+  moisturePct = Math.max(0, Math.min(100, moisturePct));
+
   return {
     temp: +(temp / rows.length).toFixed(2),
     humidity: +(hum / rows.length).toFixed(2),
     vpd: +(vpd / rows.length).toFixed(3),
     light: +(lux / rows.length).toFixed(2),
-    moisture_raw: +(moisture / rows.length).toFixed(1),
+    moisture_pct: +moisturePct.toFixed(1),
   };
 }
 
