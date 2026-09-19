@@ -10,7 +10,7 @@ export interface DaySummary {
   humidity: number;
   vpd: number;
   light: number;
-  moistureRaw: number;
+  moisturePct: number;
 }
 
 export interface DailySummaryData {
@@ -41,14 +41,14 @@ ${data.current ? `- Temp: ${data.current.temp.toFixed(1)}°C
 - Humidity: ${data.current.humidity.toFixed(1)}%
 - VPD: ${data.current.vpd.toFixed(2)} kPa
 - Light: ${Math.round(data.current.light)} lx
-- Moisture (Raw): ${data.current.moistureRaw.toFixed(0)}` : 'N/A'}
+- Moisture: ${data.current.moisturePct.toFixed(1)}%` : 'N/A'}
 
 Previous Day Findings & Calculations:
 ${data.previous ? `- Temp: ${data.previous.temp.toFixed(1)}°C
 - Humidity: ${data.previous.humidity.toFixed(1)}%
 - VPD: ${data.previous.vpd.toFixed(2)} kPa
 - Light: ${Math.round(data.previous.light)} lx
-- Moisture (Raw): ${data.previous.moistureRaw.toFixed(0)}` : 'N/A'}
+- Moisture: ${data.previous.moisturePct.toFixed(1)}%` : 'N/A'}
 
 ${drainageData && piecewiseResult ? (() => {
   const drainageResult = analyzeDrainage(drainageData, plantType);
@@ -143,10 +143,10 @@ export function SummaryDashboard({
     },
     {
       label: "Avg Moisture",
-      value: data.current.moistureRaw.toFixed(0),
-      trend: calculateTrend(data.current.moistureRaw, data.previous?.moistureRaw ?? null),
+      value: `${data.current.moisturePct.toFixed(1)}%`,
+      trend: calculateTrend(data.current.moisturePct, data.previous?.moisturePct ?? null),
       icon: <Leaf className="w-5 h-5 text-emerald-400" />,
-      desc: "Raw ADC",
+      desc: "Calibrated Moisture",
     },
   ];
 

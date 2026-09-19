@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { analyzePiecewiseDrainage } from '@/lib/piecewiseDrainage';
+import { calculateMoisturePct } from '@/lib/sensorUtils';
 
 // In-memory rate limiting map for manual recalculations
 // Map of device_id -> timestamp (ms)
@@ -129,14 +130,10 @@ async function handleRequest(req: Request) {
         moisture_pct: r.soil_moisture_raw,
       }));
 
-      // Apply fixed hardware calibration limits (1920=dry, 880=wet)
-      const DRY_LIMIT = 1920;
-      const WET_LIMIT = 880;
       const calibratedMoisture = drainageInput.map(d => {
-        let pct = ((DRY_LIMIT - d.moisture_pct) / (DRY_LIMIT - WET_LIMIT)) * 100;
         return {
           recorded_at: d.recorded_at,
-          moisture_pct: Math.max(0, Math.min(100, pct)),
+          moisture_pct: calculateMoisturePct(d.moisture_pct), // d.moisture_pct is raw here
         };
       });
 

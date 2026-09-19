@@ -47,8 +47,11 @@ export interface DrainageResult {
   bgColor: string;
 }
 
-const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
+// Time windows for analyzing drainage behavior
+// Non-succulents use a standard 7-day window.
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const TWENTY_FOUR_H = 24 * 60 * 60 * 1000;
+// Absolute percentage drop from peak used to calculate retention time
 const RETENTION_DROP = 10;
 
 function makeInsufficient(msg: string, hint: string): DrainageResult {
@@ -74,6 +77,14 @@ function makeInsufficient(msg: string, hint: string): DrainageResult {
   };
 }
 
+/**
+ * Analyzes soil moisture telemetry over a specific time window to determine
+ * drainage characteristics (retention time, 24h change, optimal states).
+ * 
+ * @param data - Array of calibrated soil moisture readings.
+ * @param plantType - The type of plant (e.g. "succulent"). Succulents trigger a 30-day analysis window; others use a 7-day window.
+ * @returns A structured result categorizing the drainage health of the soil.
+ */
 export function analyzeDrainage(data: DrainageInput[], plantType?: string | null): DrainageResult {
   if (data.length < 6) {
     return makeInsufficient(
@@ -83,7 +94,7 @@ export function analyzeDrainage(data: DrainageInput[], plantType?: string | null
   }
 
   const isSucculent = plantType === "succulent" || plantType === "cactus";
-  const WINDOW_MS = isSucculent ? 30 * 24 * 60 * 60 * 1000 : FIVE_DAYS_MS;
+  const WINDOW_MS = isSucculent ? 30 * 24 * 60 * 60 * 1000 : SEVEN_DAYS_MS;
 
   const sorted = [...data].sort(
     (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
@@ -101,7 +112,7 @@ export function analyzeDrainage(data: DrainageInput[], plantType?: string | null
 
   if (windowData.length < 2) {
     return makeInsufficient(
-      `Not enough readings in the last ${isSucculent ? "30" : "5"} days.`,
+      `Not enough readings in the last ${isSucculent ? "30" : "7"} days.`,
       "Check back once more data has been collected."
     );
   }
@@ -182,7 +193,7 @@ export function analyzeDrainage(data: DrainageInput[], plantType?: string | null
       drainClass: "unknown",
       description: isSucculent
         ? `In drought phase. Moisture range: ${moistureMin.toFixed(0)}–${moistureMax.toFixed(0)}%.`
-        : `No watering events detected in the last 5 days. Moisture range: ${moistureMin.toFixed(0)}–${moistureMax.toFixed(0)}%.`,
+        : `No watering events detected in the last 7 days. Moisture range: ${moistureMin.toFixed(0)}–${moistureMax.toFixed(0)}%.`,
       plantHint: isSucculent
         ? "Succulents thrive in extended dry periods. Water only if visually needed."
         : "Water the plant or wait for rain to measure soil retention.",
