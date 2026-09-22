@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { calculateMoisturePct } from '@/lib/sensorUtils';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -32,8 +33,7 @@ function computeDayAvg(rows: Record<string, unknown>[]): DaySummary | null {
     vpd += eSat * (1 - (r.humidity_rh as number) / 100);
   }
   const avgMoistureRaw = moisture / rows.length;
-  let moisturePct = ((1920.0 - avgMoistureRaw) / (1920.0 - 880.0)) * 100.0;
-  moisturePct = Math.max(0, Math.min(100, moisturePct));
+  const moisturePct = calculateMoisturePct(avgMoistureRaw);
 
   return {
     temp: +(temp / rows.length).toFixed(2),
