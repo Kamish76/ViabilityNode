@@ -17,7 +17,7 @@ exports.medianFilter = medianFilter;
 exports.detectWateringEvents = detectWateringEvents;
 exports.HARDCODED_CALIBRATION = {
     dryLimit: 1920,
-    wetLimit: 880,
+    wetLimit: 810,
 };
 function calculateMoisturePct(rawADC) {
     var dryLimit = exports.HARDCODED_CALIBRATION.dryLimit, wetLimit = exports.HARDCODED_CALIBRATION.wetLimit;
