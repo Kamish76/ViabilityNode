@@ -1,6 +1,6 @@
 export const HARDCODED_CALIBRATION = {
   dryLimit: 1920,
-  wetLimit: 880,
+  wetLimit: 810,
 };
 
 export function calculateMoisturePct(rawADC: number): number {
