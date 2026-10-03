@@ -705,7 +705,7 @@ export function ThreatAlertsPanel({
                 
                 <div className="bg-zinc-800/40 p-3.5 rounded-xl border border-zinc-700/50">
                   <h5 className="text-xs font-bold text-white mb-1.5 flex items-center gap-2"><Zap className="w-4 h-4 text-emerald-400"/> Growth Optimization</h5>
-                  <p className="text-xs text-zinc-400 leading-relaxed">Calculates if the "holy trinity" is perfectly aligned for vegetative growth: Ideal DLI range + well-oxygenated rapid drainage + stable VPD (0.8-1.2 kPa).</p>
+                  <p className="text-xs text-zinc-400 leading-relaxed">Calculates if the &quot;holy trinity&quot; is perfectly aligned for vegetative growth: Ideal DLI range + well-oxygenated rapid drainage + stable VPD (0.8-1.2 kPa).</p>
                 </div>
               </div>
             </div>
