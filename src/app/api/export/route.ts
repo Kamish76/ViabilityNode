@@ -60,26 +60,34 @@ export async function OPTIONS() {
 // Returns a comprehensive JSON snapshot of all project data for the last 30 days.
 // Designed for LLM consumption, analytics tools, or any programmatic data pull.
 
-export async function GET() {
+export async function GET(req: Request) {
   const errors: string[] = [];
 
   try {
-    // ── 1. Discover device_id from most recent telemetry ───────────────────
-    const { data: latestRow, error: latestError } = await supabaseAdmin
-      .from('telemetry')
-      .select('device_id')
-      .order('recorded_at', { ascending: false })
-      .limit(1)
-      .single();
+    const { searchParams } = new URL(req.url);
+    const requestedDeviceId = searchParams.get('device_id');
 
-    if (latestError || !latestRow) {
-      return NextResponse.json(
-        { error: 'No telemetry data found. Is the node reporting?' },
-        { status: 404, headers: CORS_HEADERS }
-      );
+    let deviceId = requestedDeviceId;
+
+    // ── 1. If device_id not specified, discover from most recent telemetry ──
+    if (!deviceId) {
+      const { data: latestRow, error: latestError } = await supabaseAdmin
+        .from('telemetry')
+        .select('device_id')
+        .order('recorded_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (latestError || !latestRow) {
+        return NextResponse.json(
+          { error: 'No telemetry data found. Is any node reporting?' },
+          { status: 404, headers: CORS_HEADERS }
+        );
+      }
+
+      deviceId = latestRow.device_id as string;
     }
 
-    const deviceId = latestRow.device_id as string;
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const thirtyDaysIso = thirtyDaysAgo.toISOString();

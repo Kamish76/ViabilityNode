@@ -1,19 +1,83 @@
+/* eslint-disable react-hooks/purity */
 import { supabaseAdmin } from "@/lib/supabase";
 import { DashboardClient, TelemetryData, BatterySnapshot } from "./DashboardClient";
 import type { DLIDataPoint } from "./components/DLIChart";
 import type { VPDDataPoint } from "./components/VPDChart";
 import type { Deployment } from "./components/DeploymentPanel";
 import type { PrecalculatedProfile } from "./components/MicroclimatProfileCard";
+import type { NodeSummary } from "./components/NodeSwitcher";
 
 // Opt out of static rendering so we fetch fresh data on reload
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default async function DashboardPage(props: {
+  searchParams: Promise<{ node?: string }>;
+}) {
+  const searchParams = await props.searchParams;
+  const requestedNode = searchParams?.node;
 
-  // ── 1. Latest 50 telemetry records (with VPD) ─────────────────────────────
+  // ── 0. Multi-Node Discovery & Metadata ────────────────────────────────────
+  const [deploymentsRes, recentTelemetryRes] = await Promise.all([
+    supabaseAdmin
+      .from("node_deployments")
+      .select("device_id, label, plant_type, ended_at"),
+    supabaseAdmin
+      .from("telemetry")
+      .select("device_id, recorded_at, temperature_c, humidity_rh, battery_pct")
+      .order("recorded_at", { ascending: false })
+      .limit(200),
+  ]);
+
+  const nodeSet = new Set<string>(["plant_node_01", "plant_node_02"]);
+  deploymentsRes.data?.forEach((d) => {
+    if (d.device_id) nodeSet.add(d.device_id);
+  });
+  recentTelemetryRes.data?.forEach((t) => {
+    if (t.device_id) nodeSet.add(t.device_id);
+  });
+
+  const availableNodes = Array.from(nodeSet).sort();
+
+  const nodeSummaries: NodeSummary[] = availableNodes.map((id) => {
+    const latestReading = recentTelemetryRes.data?.find((t) => t.device_id === id);
+    const activeDep = deploymentsRes.data?.find(
+      (d) => d.device_id === id && d.ended_at === null
+    );
+    const lastSeen = latestReading?.recorded_at ?? null;
+
+    let status: "online" | "idle" | "offline" = "offline";
+    if (lastSeen) {
+      const ageMs = Date.now() - new Date(lastSeen).getTime();
+      if (ageMs < 15 * 60 * 1000) {
+        status = "online";
+      } else if (ageMs < 24 * 60 * 60 * 1000) {
+        status = "idle";
+      }
+    }
+
+    return {
+      nodeId: id,
+      status,
+      lastSeen,
+      activeDeploymentLabel: activeDep?.label ?? null,
+      plantType: activeDep?.plant_type ?? null,
+      latestTemp: latestReading?.temperature_c ?? null,
+      latestHumidity: latestReading?.humidity_rh ?? null,
+      latestBattery: latestReading?.battery_pct ?? null,
+    };
+  });
+
+  // Selected device: use requested URL param if valid, or default to plant_node_01
+  const selectedDeviceId =
+    requestedNode && availableNodes.includes(requestedNode)
+      ? requestedNode
+      : availableNodes[0] || "plant_node_01";
+
+  // ── 1. Latest 50 telemetry records for selected node (with VPD) ───────────
   const { data: logs, error } = await supabaseAdmin
     .from("telemetry_with_vpd")
     .select("*")
+    .eq("device_id", selectedDeviceId)
     .order("recorded_at", { ascending: false })
     .limit(50);
 
@@ -24,6 +88,7 @@ export default async function DashboardPage() {
     const { data: fallbackLogs, error: fallbackError } = await supabaseAdmin
       .from("telemetry")
       .select("*")
+      .eq("device_id", selectedDeviceId)
       .order("recorded_at", { ascending: false })
       .limit(50);
 
@@ -34,13 +99,11 @@ export default async function DashboardPage() {
     }
   }
 
-  const deviceId = dataToUse?.[0]?.device_id ?? null;
-
-  // ── 0. Daily Summary Data (Current vs Previous Day) ───────────────
+  // ── 2. Daily Summary Data (Current vs Previous Day) for selected node ─────
   const { data: summaryData } = await supabaseAdmin
     .from("daily_telemetry_summary")
     .select("*")
-    .eq("device_id", deviceId ?? "")
+    .eq("device_id", selectedDeviceId)
     .order("day", { ascending: false })
     .limit(2);
 
@@ -65,28 +128,23 @@ export default async function DashboardPage() {
       };
     }
   }
-  
+
   const dailySummary = { current: currentSummary, previous: previousSummary };
 
-
-
-
-  // ── 2. 7-day battery history for autonomy estimation ──────────────────────
+  // ── 3. 7-day battery history for autonomy estimation ──────────────────────
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
   let batteryRows: { recorded_at: string; battery_pct: number }[] = [];
-  if (deviceId) {
-    const { data } = await supabaseAdmin
-      .from("telemetry")
-      .select("recorded_at, battery_pct")
-      .eq("device_id", deviceId)
-      .gte("recorded_at", sevenDaysAgo.toISOString())
-      .not("battery_pct", "is", null)
-      .order("recorded_at", { ascending: true })
-      .limit(500);
-    batteryRows = data ?? [];
-  }
+  const { data: batteryData } = await supabaseAdmin
+    .from("telemetry")
+    .select("recorded_at, battery_pct")
+    .eq("device_id", selectedDeviceId)
+    .gte("recorded_at", sevenDaysAgo.toISOString())
+    .not("battery_pct", "is", null)
+    .order("recorded_at", { ascending: true })
+    .limit(500);
+  batteryRows = batteryData ?? [];
 
   // One sample per calendar day (earliest of each day)
   const batteryHistory: BatterySnapshot[] = [];
@@ -102,50 +160,47 @@ export default async function DashboardPage() {
     }
   }
 
-  // ── 3. Phase 2.1: Daily Light Integral — last 30 days ────────────────────
+  // ── 4. Phase 2.1: Daily Light Integral — last 30 days ────────────────────
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
   let dliHistory: DLIDataPoint[] = [];
-  
-  if (deviceId) {
-    const { data: dliRows, error: dliError } = await supabaseAdmin
-      .from("daily_dli")
-      .select("day, dli_mol_per_m2, reading_count")
-      .eq("device_id", deviceId)
-      .gte("day", thirtyDaysAgo.toISOString().slice(0, 10))
-      .order("day", { ascending: false })
-      .limit(30);
+  const { data: dliRows, error: dliError } = await supabaseAdmin
+    .from("daily_dli")
+    .select("day, dli_mol_per_m2, reading_count")
+    .eq("device_id", selectedDeviceId)
+    .gte("day", thirtyDaysAgo.toISOString().slice(0, 10))
+    .order("day", { ascending: false })
+    .limit(30);
 
-    if (dliError) {
-      console.error("Failed to fetch daily_dli view:", dliError);
-    } else {
-      dliHistory = (dliRows ?? []) as DLIDataPoint[];
-    }
+  if (dliError) {
+    console.error("Failed to fetch daily_dli view:", dliError);
+  } else {
+    dliHistory = (dliRows ?? []) as DLIDataPoint[];
   }
 
+  // ── 5. Phase 2.3: 7-day rolling VPD ──────────────────────────────────────
   let vpdHistory: VPDDataPoint[] = [];
-  if (deviceId) {
-    const { data: vpdRows, error: vpdError } = await supabaseAdmin
-      .from("telemetry_with_vpd")
-      .select("recorded_at, vpd_kpa, temperature_c, humidity_rh")
-      .eq("device_id", deviceId)
-      .gte("recorded_at", sevenDaysAgo.toISOString())
-      .not("vpd_kpa", "is", null)
-      .order("recorded_at", { ascending: false })
-      .limit(5000);
+  const { data: vpdRows, error: vpdError } = await supabaseAdmin
+    .from("telemetry_with_vpd")
+    .select("recorded_at, vpd_kpa, temperature_c, humidity_rh")
+    .eq("device_id", selectedDeviceId)
+    .gte("recorded_at", sevenDaysAgo.toISOString())
+    .not("vpd_kpa", "is", null)
+    .order("recorded_at", { ascending: false })
+    .limit(5000);
 
-    if (vpdError) {
-      console.error("Failed to fetch vpd from telemetry_with_vpd:", vpdError.message);
-    } else {
-      vpdHistory = ((vpdRows ?? []) as VPDDataPoint[]).reverse();
-    }
+  if (vpdError) {
+    console.error("Failed to fetch vpd from telemetry_with_vpd:", vpdError.message);
+  } else {
+    vpdHistory = ((vpdRows ?? []) as VPDDataPoint[]).reverse();
   }
 
   // Thin VPD for the chart
-  // eslint-disable-next-line react-hooks/purity
   const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const vpd7Day = vpdHistory.filter(d => new Date(d.recorded_at).getTime() >= sevenDaysAgoMs);
+  const vpd7Day = vpdHistory.filter(
+    (d) => new Date(d.recorded_at).getTime() >= sevenDaysAgoMs
+  );
   const thinFactor = Math.max(1, Math.floor(vpd7Day.length / 300));
   const vpdThinned = vpd7Day.filter((_, i) => i % thinFactor === 0);
 
@@ -155,64 +210,53 @@ export default async function DashboardPage() {
       ? vpdThinned.reduce((s, d) => s + d.vpd_kpa, 0) / vpdThinned.length
       : null;
 
-  // ── 5. Phase 2.2 + 3: Soil drainage — 7-day moisture history ───────────
+  // ── 6. Phase 2.2 + 3: Soil drainage — 30-day moisture history ───────────
   let moistureHistory: { recorded_at: string; soil_moisture_raw: number }[] = [];
-  if (deviceId) {
-    const { data: moistureRows } = await supabaseAdmin
-      .from("telemetry")
-      .select("recorded_at, soil_moisture_raw")
-      .eq("device_id", deviceId)
-      .gte("recorded_at", thirtyDaysAgo.toISOString())
-      .order("recorded_at", { ascending: false })
-      .limit(5000);
+  const { data: moistureRows } = await supabaseAdmin
+    .from("telemetry")
+    .select("recorded_at, soil_moisture_raw")
+    .eq("device_id", selectedDeviceId)
+    .gte("recorded_at", thirtyDaysAgo.toISOString())
+    .order("recorded_at", { ascending: false })
+    .limit(5000);
 
-    moistureHistory = (moistureRows ?? []).reverse().map((r) => ({
-      recorded_at: r.recorded_at as string,
-      soil_moisture_raw: r.soil_moisture_raw as number,
-    }));
-  }
+  moistureHistory = (moistureRows ?? []).reverse().map((r) => ({
+    recorded_at: r.recorded_at as string,
+    soil_moisture_raw: r.soil_moisture_raw as number,
+  }));
 
-  // ── 6. Deployment tracking — active deployment + history ─────────────────
-
+  // ── 7. Deployment tracking — active deployment + history for this device ─
   let activeDeployment: Deployment | null = null;
   let deploymentHistory: Deployment[] = [];
 
-  let deviceSettings = null;
+  const { data: deploymentRows, error: deploymentError } = await supabaseAdmin
+    .from("node_deployments")
+    .select("*")
+    .eq("device_id", selectedDeviceId)
+    .order("started_at", { ascending: false });
 
-  if (deviceId) {
-    // Dynamic device settings removed. Hardcoded calibration (1920/880) is used everywhere.
-    
-    // Fetch all deployments for this device (active first)
-    const { data: deploymentRows, error: deploymentError } = await supabaseAdmin
-      .from("node_deployments")
-      .select("*")
-      .eq("device_id", deviceId)
-      .order("started_at", { ascending: false });
-
-    if (deploymentError) {
-      console.warn("node_deployments table not found or error:", deploymentError.message);
-    } else {
-      deploymentHistory = (deploymentRows ?? []) as Deployment[];
-      activeDeployment = deploymentHistory.find((d) => d.ended_at === null) ?? null;
-    }
+  if (deploymentError) {
+    console.warn("node_deployments table not found or error:", deploymentError.message);
+  } else {
+    deploymentHistory = (deploymentRows ?? []) as Deployment[];
+    activeDeployment = deploymentHistory.find((d) => d.ended_at === null) ?? null;
   }
 
-  // ── 7. Fetch precalculated microclimate profile ─────────────────────────
+  // ── 8. Fetch precalculated microclimate profile for this device ──────────
   let microclimateProfile: PrecalculatedProfile | null = null;
-  if (deviceId) {
-    const { data: profileData, error: profileError } = await supabaseAdmin
-      .from("node_microclimates")
-      .select("*")
-      .eq("device_id", deviceId)
-      .single();
+  const { data: profileData } = await supabaseAdmin
+    .from("node_microclimates")
+    .select("*")
+    .eq("device_id", selectedDeviceId)
+    .single();
 
-    if (profileData) {
-      microclimateProfile = profileData as PrecalculatedProfile;
-    }
+  if (profileData) {
+    microclimateProfile = profileData as PrecalculatedProfile;
   }
 
   return (
     <DashboardClient
+      key={selectedDeviceId}
       initialLogs={dataToUse ?? []}
       batteryHistory={batteryHistory}
       dliHistory={dliHistory}
@@ -224,6 +268,9 @@ export default async function DashboardPage() {
       deploymentHistory={deploymentHistory}
       dailySummary={dailySummary}
       microclimateProfile={microclimateProfile}
+      selectedDeviceId={selectedDeviceId}
+      availableNodes={availableNodes}
+      nodeSummaries={nodeSummaries}
     />
   );
 }

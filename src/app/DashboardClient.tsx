@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useSyncExternalStore } from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
   Droplets,
@@ -10,9 +10,6 @@ import {
   Battery,
   Activity,
   Leaf,
-  Settings2,
-  X,
-  FlaskConical,
   AlertTriangle,
   Clock,
   Copy,
@@ -36,7 +33,8 @@ import { TrialProgressCard } from "./components/TrialProgressCard";
 import { SideNav } from "./components/SideNav";
 import { SummaryDashboard, type DailySummaryData } from "./components/SummaryDashboard";
 import { calculateMoisturePct } from "@/lib/sensorUtils";
-import { analyzeDrainage, type DrainageInput, type DrainageResult } from "@/lib/drainageAnalysis";
+import { analyzeDrainage, type DrainageInput } from "@/lib/drainageAnalysis";
+import { NodeSwitcher, type NodeSummary } from "./components/NodeSwitcher";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -191,6 +189,9 @@ export function DashboardClient({
   deploymentHistory: initialDeploymentHistory,
   dailySummary,
   microclimateProfile,
+  selectedDeviceId,
+  availableNodes,
+  nodeSummaries,
 }: {
   initialLogs: TelemetryData[];
   batteryHistory: BatterySnapshot[];
@@ -203,18 +204,24 @@ export function DashboardClient({
   deploymentHistory: Deployment[];
   dailySummary: DailySummaryData;
   microclimateProfile: PrecalculatedProfile | null;
+  selectedDeviceId: string;
+  availableNodes: string[];
+  nodeSummaries: NodeSummary[];
 }) {
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
   const [currentDeployment, setCurrentDeployment] = useState<Deployment | null>(initialActiveDeployment);
   const [allDeployments, setAllDeployments] = useState<Deployment[]>(initialDeploymentHistory);
-  const [mounted, setMounted] = useState(false);
+  const [summaries, setSummaries] = useState<NodeSummary[]>(nodeSummaries);
   const supabase = createClient();
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const emptySubscribe = () => () => {};
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
 
-  // Real-time subscription
+  // Real-time subscription scoped by device
   useEffect(() => {
     const channel = supabase
       .channel("realtime:telemetry")
@@ -226,15 +233,37 @@ export function DashboardClient({
           if (newLog.vpd_kpa === undefined) {
             newLog.vpd_kpa = calculateVPD(newLog.temperature_c, newLog.humidity_rh, newLog.illuminance_lux);
           }
-          setLogs((current) => {
-            if (current.some((l) => l.id === newLog.id)) return current;
-            return [newLog, ...current].slice(0, 50);
-          });
+
+          // If new log matches active device, update logs view
+          if (newLog.device_id === selectedDeviceId) {
+            setLogs((current) => {
+              if (current.some((l) => l.id === newLog.id)) return current;
+              return [newLog, ...current].slice(0, 50);
+            });
+          }
+
+          // Update node summaries in the switcher in real time
+          setSummaries((prev) =>
+            prev.map((s) =>
+              s.nodeId === newLog.device_id
+                ? {
+                    ...s,
+                    status: "online",
+                    lastSeen: newLog.recorded_at,
+                    latestTemp: newLog.temperature_c,
+                    latestHumidity: newLog.humidity_rh,
+                    latestBattery: newLog.battery_pct ?? s.latestBattery,
+                  }
+                : s
+            )
+          );
         }
       )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [supabase]);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, selectedDeviceId]);
 
   const latest = logs.length > 0 ? logs[0] : null;
 
@@ -358,13 +387,56 @@ export function DashboardClient({
             </div>
           </header>
 
+          {/* Node Switcher Toggle Bar */}
+          <NodeSwitcher
+            selectedDeviceId={selectedDeviceId}
+            availableNodes={availableNodes}
+            nodeSummaries={summaries}
+          />
+
           {!latest ? (
-            <div className="p-12 text-center rounded-3xl border border-zinc-800/50 bg-zinc-900/20 backdrop-blur-sm">
-              <Activity className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
-              <h2 className="text-xl font-medium text-white mb-2">No data available</h2>
-              <p className="text-zinc-400">
-                Waiting for telemetry logs from the surrogate node...
-              </p>
+            <div className="space-y-8">
+              <div className="p-8 sm:p-12 text-center rounded-3xl border border-zinc-800/80 bg-zinc-900/30 backdrop-blur-xl shadow-2xl relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-b from-emerald-500/5 to-transparent pointer-events-none" />
+                <div className="relative z-10 max-w-xl mx-auto">
+                  <div className="inline-flex p-3 rounded-2xl bg-zinc-800/70 border border-zinc-700/60 text-emerald-400 mb-4 shadow-inner">
+                    <Activity className="w-8 h-8 animate-pulse" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-white mb-2">
+                    Awaiting Telemetry for <span className="font-mono text-emerald-400">{selectedDeviceId}</span>
+                  </h2>
+                  <p className="text-zinc-400 text-sm leading-relaxed mb-6">
+                    This surrogate node has not recorded any sensor readings yet. Power on your second ESP32 node configured with device ID <code className="px-2 py-0.5 rounded bg-zinc-800 font-mono text-emerald-300 text-xs">{selectedDeviceId}</code> to begin streaming telemetry.
+                  </p>
+
+                  {/* Payload Example */}
+                  <div className="text-left bg-zinc-950/80 border border-zinc-800/80 rounded-2xl p-4 text-xs font-mono text-zinc-300 overflow-x-auto shadow-inner">
+                    <div className="flex items-center justify-between text-[11px] text-zinc-500 pb-2 mb-2 border-b border-zinc-800">
+                      <span>POST /api/telemetry JSON Schema</span>
+                      <span className="text-emerald-400">device_id: &quot;{selectedDeviceId}&quot;</span>
+                    </div>
+                    <pre>{`{
+  "device_id": "${selectedDeviceId}",
+  "temperature_c": 26.5,
+  "humidity_rh": 68.0,
+  "illuminance_lux": 2400,
+  "pressure_hpa": 1012.2,
+  "soil_moisture_raw": 1650,
+  "battery_v": 4.12,
+  "battery_pct": 92
+}`}</pre>
+                  </div>
+                </div>
+              </div>
+
+              {/* Allow user to configure deployment for this node in advance */}
+              <DeploymentPanel
+                activeDeployment={currentDeployment}
+                deploymentHistory={allDeployments}
+                deviceId={selectedDeviceId}
+                onDeploymentCreated={handleDeploymentCreated}
+                onDeploymentUpdated={handleDeploymentUpdated}
+              />
             </div>
           ) : (
             <div className="space-y-16 lg:space-y-24">
@@ -445,7 +517,7 @@ export function DashboardClient({
                   <DeploymentPanel
                     activeDeployment={currentDeployment}
                     deploymentHistory={allDeployments}
-                    deviceId={latest.device_id}
+                    deviceId={selectedDeviceId}
                     onDeploymentCreated={handleDeploymentCreated}
                     onDeploymentUpdated={handleDeploymentUpdated}
                   />
@@ -508,7 +580,7 @@ export function DashboardClient({
                 <MicroclimatProfileCard
                   profile={microclimateProfile}
                   placementType={placementType}
-                  deviceId={latest?.device_id}
+                  deviceId={selectedDeviceId}
                 />
 
                 {/* 2.1 — Daily Light Integral */}
