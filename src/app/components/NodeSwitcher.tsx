@@ -14,10 +14,11 @@ import {
   PlusCircle,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import type { NodeStatus } from "@/lib/nodeStatus";
 
 export interface NodeSummary {
   nodeId: string;
-  status: "online" | "idle" | "offline";
+  status: NodeStatus;
   lastSeen: string | null;
   activeDeploymentLabel: string | null;
   plantType: string | null;
@@ -125,6 +126,8 @@ export function NodeSwitcher({
                               ? "bg-emerald-400 animate-pulse ring-2 ring-emerald-400/20"
                               : isIdle
                               ? "bg-amber-400 ring-2 ring-amber-400/20"
+                              : hasData
+                              ? "bg-zinc-500"
                               : "bg-zinc-600"
                           }`}
                         />
@@ -134,10 +137,12 @@ export function NodeSwitcher({
                               ? "text-emerald-400"
                               : isIdle
                               ? "text-amber-400"
+                              : hasData
+                              ? "text-zinc-400"
                               : "text-zinc-500"
                           }
                         >
-                          {isOnline ? "Live" : isIdle ? "Idle" : "Awaiting data"}
+                          {isOnline ? "Live" : isIdle ? "Idle" : hasData ? "Offline" : "Awaiting data"}
                         </span>
                       </span>
                     </div>

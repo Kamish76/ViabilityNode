@@ -6,6 +6,7 @@ import type { VPDDataPoint } from "./components/VPDChart";
 import type { Deployment } from "./components/DeploymentPanel";
 import type { PrecalculatedProfile } from "./components/MicroclimatProfileCard";
 import type { NodeSummary } from "./components/NodeSwitcher";
+import { getNodeStatus } from "@/lib/nodeStatus";
 
 // Opt out of static rendering so we fetch fresh data on reload
 export const dynamic = "force-dynamic";
@@ -45,15 +46,7 @@ export default async function DashboardPage(props: {
     );
     const lastSeen = latestReading?.recorded_at ?? null;
 
-    let status: "online" | "idle" | "offline" = "offline";
-    if (lastSeen) {
-      const ageMs = Date.now() - new Date(lastSeen).getTime();
-      if (ageMs < 15 * 60 * 1000) {
-        status = "online";
-      } else if (ageMs < 24 * 60 * 60 * 1000) {
-        status = "idle";
-      }
-    }
+    const status = getNodeStatus(lastSeen);
 
     return {
       nodeId: id,
@@ -179,6 +172,22 @@ export default async function DashboardPage(props: {
     dliHistory = (dliRows ?? []) as DLIDataPoint[];
   }
 
+  // ── 4.5. Light telemetry history for photoperiod analysis (last 7 days) ───
+  let lightHistory: { recorded_at: string; illuminance_lux: number }[] = [];
+  const { data: lightRows, error: lightError } = await supabaseAdmin
+    .from("telemetry")
+    .select("recorded_at, illuminance_lux")
+    .eq("device_id", selectedDeviceId)
+    .gte("recorded_at", sevenDaysAgo.toISOString())
+    .order("recorded_at", { ascending: true })
+    .limit(3000);
+
+  if (lightError) {
+    console.warn("Failed to fetch light history from telemetry:", lightError.message);
+  } else {
+    lightHistory = (lightRows ?? []) as { recorded_at: string; illuminance_lux: number }[];
+  }
+
   // ── 5. Phase 2.3: 7-day rolling VPD ──────────────────────────────────────
   let vpdHistory: VPDDataPoint[] = [];
   const { data: vpdRows, error: vpdError } = await supabaseAdmin
@@ -300,6 +309,7 @@ export default async function DashboardPage(props: {
       selectedDeviceId={selectedDeviceId}
       availableNodes={availableNodes}
       nodeSummaries={nodeSummaries}
+      lightHistory={lightHistory}
     />
   );
 }

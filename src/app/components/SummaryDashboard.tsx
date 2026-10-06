@@ -4,6 +4,7 @@ import { useState } from "react";
 import { TrendingUp, TrendingDown, Minus, Thermometer, Droplets, Wind, Sun, Leaf, Copy, Check } from "lucide-react";
 import { type DrainageInput, analyzeDrainage } from "@/lib/drainageAnalysis";
 import type { PiecewiseDrainageResult } from "@/lib/piecewiseDrainage";
+import type { PhotoperiodAnalysisResult } from "@/lib/photoperiodAnalysis";
 
 export interface DaySummary {
   temp: number;
@@ -23,13 +24,15 @@ function CopySummaryButton({
   viabilityStatus,
   plantType,
   drainageData,
-  piecewiseResult
+  piecewiseResult,
+  photoperiodResult,
 }: {
   data: DailySummaryData;
   viabilityStatus?: string | null;
   plantType?: string | null;
   drainageData?: DrainageInput[];
   piecewiseResult?: PiecewiseDrainageResult;
+  photoperiodResult?: PhotoperiodAnalysisResult;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -62,6 +65,10 @@ ${drainageData && piecewiseResult ? (() => {
 - Macropore Failure: ${piecewiseResult.phase1Failure ? 'Yes' : 'No'}
 `;
 })() : ''}
+${photoperiodResult ? `Photoperiod Dynamics:
+- 0-Lux Night Time: ${photoperiodResult.yesterday?.zeroLuxHours ?? photoperiodResult.today?.zeroLuxHours ?? 'N/A'}h (Status: ${photoperiodResult.darkStatus})
+- Usable Light: ${photoperiodResult.yesterday?.usableLightHours ?? photoperiodResult.today?.usableLightHours ?? 'N/A'}h (Threshold: ≥ ${photoperiodResult.config.usableThresholdLux} lx, Target: ${photoperiodResult.config.targetUsableHours}h, Status: ${photoperiodResult.usableStatus})
+` : ''}
 Overall Status: ${viabilityStatus || 'Monitoring'}
 Plant Type: ${plantType || 'Standard'}
 `;
@@ -87,13 +94,15 @@ export function SummaryDashboard({
   viabilityStatus,
   plantType,
   drainageData,
-  piecewiseResult
+  piecewiseResult,
+  photoperiodResult,
 }: { 
   data: DailySummaryData;
   viabilityStatus?: "optimal" | "warning" | "critical" | "monitoring" | null;
   plantType?: string | null;
   drainageData?: DrainageInput[];
   piecewiseResult?: PiecewiseDrainageResult;
+  photoperiodResult?: PhotoperiodAnalysisResult;
 }) {
   if (!data.current) return null;
 
@@ -168,6 +177,7 @@ export function SummaryDashboard({
             plantType={plantType} 
             drainageData={drainageData}
             piecewiseResult={piecewiseResult}
+            photoperiodResult={photoperiodResult}
           />
           {viabilityStatus ? (
             <div className={`flex items-center gap-2 px-4 py-2 rounded-full border ${
