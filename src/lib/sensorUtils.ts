@@ -1,13 +1,16 @@
-export const HARDCODED_CALIBRATION = {
+export const DEFAULT_CALIBRATION = {
   dryLimit: 1920,
-  wetLimit: 810,
+  wetLimit: 880,
 };
 
-export function calculateMoisturePct(rawADC: number): number {
-  const { dryLimit, wetLimit } = HARDCODED_CALIBRATION;
+export function calculateMoisturePct(
+  rawADC: number,
+  dryLimit: number = DEFAULT_CALIBRATION.dryLimit,
+  wetLimit: number = DEFAULT_CALIBRATION.wetLimit
+): number {
   if (dryLimit === wetLimit) return 0;
   const pct = ((dryLimit - rawADC) / (dryLimit - wetLimit)) * 100;
-  return Math.max(0, Math.min(100, pct));
+  return Math.max(0, Math.min(100, Math.round(pct * 10) / 10));
 }
 
 export interface MoistureReading {

@@ -211,18 +211,33 @@ export default async function DashboardPage(props: {
       : null;
 
   // ── 6. Phase 2.2 + 3: Soil drainage — 30-day moisture history ───────────
-  let moistureHistory: { recorded_at: string; soil_moisture_raw: number }[] = [];
-  const { data: moistureRows } = await supabaseAdmin
+  let moistureHistory: { recorded_at: string; soil_moisture_raw: number; soil_moisture_pct?: number }[] = [];
+  const { data: moistureRows, error: moistureError } = await supabaseAdmin
     .from("telemetry")
-    .select("recorded_at, soil_moisture_raw")
+    .select("recorded_at, soil_moisture_raw, soil_moisture_pct")
     .eq("device_id", selectedDeviceId)
     .gte("recorded_at", thirtyDaysAgo.toISOString())
     .order("recorded_at", { ascending: false })
     .limit(5000);
 
-  moistureHistory = (moistureRows ?? []).reverse().map((r) => ({
-    recorded_at: r.recorded_at as string,
-    soil_moisture_raw: r.soil_moisture_raw as number,
+  let rawMoistureData: { recorded_at: string; soil_moisture_raw: number; soil_moisture_pct?: number | null }[] | null = moistureRows;
+  if (moistureError) {
+    // If migration hasn't been run yet, soil_moisture_pct won't exist in telemetry table
+    console.warn("soil_moisture_pct column not available yet, falling back to raw ADC:", moistureError.message);
+    const { data: fallbackRows } = await supabaseAdmin
+      .from("telemetry")
+      .select("recorded_at, soil_moisture_raw")
+      .eq("device_id", selectedDeviceId)
+      .gte("recorded_at", thirtyDaysAgo.toISOString())
+      .order("recorded_at", { ascending: false })
+      .limit(5000);
+    rawMoistureData = fallbackRows;
+  }
+
+  moistureHistory = (rawMoistureData ?? []).reverse().map((r) => ({
+    recorded_at: r.recorded_at,
+    soil_moisture_raw: r.soil_moisture_raw,
+    soil_moisture_pct: r.soil_moisture_pct != null ? (r.soil_moisture_pct as number) : undefined,
   }));
 
   // ── 7. Deployment tracking — active deployment + history for this device ─
@@ -248,10 +263,23 @@ export default async function DashboardPage(props: {
     .from("node_microclimates")
     .select("*")
     .eq("device_id", selectedDeviceId)
-    .single();
+    .maybeSingle();
 
   if (profileData) {
     microclimateProfile = profileData as PrecalculatedProfile;
+  }
+
+
+  // ── 9. Fetch device settings for calibration ──────────────────────────────
+  let deviceSettings = null;
+  const { data: settingsData } = await supabaseAdmin
+    .from("device_settings")
+    .select("*")
+    .eq("device_id", selectedDeviceId)
+    .maybeSingle();
+  
+  if (settingsData) {
+    deviceSettings = settingsData;
   }
 
   return (
@@ -268,6 +296,7 @@ export default async function DashboardPage(props: {
       deploymentHistory={deploymentHistory}
       dailySummary={dailySummary}
       microclimateProfile={microclimateProfile}
+      deviceSettings={deviceSettings}
       selectedDeviceId={selectedDeviceId}
       availableNodes={availableNodes}
       nodeSummaries={nodeSummaries}

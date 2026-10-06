@@ -41,14 +41,14 @@ ${data.current ? `- Temp: ${data.current.temp.toFixed(1)}°C
 - Humidity: ${data.current.humidity.toFixed(1)}%
 - VPD: ${data.current.vpd.toFixed(2)} kPa
 - Light: ${Math.round(data.current.light)} lx
-- Moisture: ${data.current.moisturePct.toFixed(1)}%` : 'N/A'}
+- Moisture: ${data.current.moisturePct != null ? `${data.current.moisturePct.toFixed(1)}%` : 'N/A'}` : 'N/A'}
 
 Previous Day Findings & Calculations:
 ${data.previous ? `- Temp: ${data.previous.temp.toFixed(1)}°C
 - Humidity: ${data.previous.humidity.toFixed(1)}%
 - VPD: ${data.previous.vpd.toFixed(2)} kPa
 - Light: ${Math.round(data.previous.light)} lx
-- Moisture: ${data.previous.moisturePct.toFixed(1)}%` : 'N/A'}
+- Moisture: ${data.previous.moisturePct != null ? `${data.previous.moisturePct.toFixed(1)}%` : 'N/A'}` : 'N/A'}
 
 ${drainageData && piecewiseResult ? (() => {
   const drainageResult = analyzeDrainage(drainageData, plantType);
@@ -97,8 +97,8 @@ export function SummaryDashboard({
 }) {
   if (!data.current) return null;
 
-  const calculateTrend = (current: number, previous: number | null) => {
-    if (previous === null) return null;
+  const calculateTrend = (current: number | null | undefined, previous: number | null | undefined) => {
+    if (current === null || current === undefined || previous === null || previous === undefined) return null;
     const diff = current - previous;
     // Assume a small threshold to be considered "stable"
     if (Math.abs(diff) < 0.1) return "stable";
@@ -143,7 +143,7 @@ export function SummaryDashboard({
     },
     {
       label: "Avg Moisture",
-      value: `${data.current.moisturePct.toFixed(1)}%`,
+      value: data.current.moisturePct != null ? `${data.current.moisturePct.toFixed(1)}%` : "—",
       trend: calculateTrend(data.current.moisturePct, data.previous?.moisturePct ?? null),
       icon: <Leaf className="w-5 h-5 text-emerald-400" />,
       desc: "Calibrated Moisture",

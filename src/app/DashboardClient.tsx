@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
+import { CalibrationSettingsModal, type DeviceSettings } from "./components/CalibrationSettingsModal";
 import { VPDChart, type VPDDataPoint } from "./components/VPDChart";
 import { AtmosphericCorrelationChart } from "./components/AtmosphericCorrelationChart";
 import { DrainageCard } from "./components/DrainageCard";
@@ -32,9 +33,9 @@ import { DeploymentPanel, type Deployment } from "./components/DeploymentPanel";
 import { TrialProgressCard } from "./components/TrialProgressCard";
 import { SideNav } from "./components/SideNav";
 import { SummaryDashboard, type DailySummaryData } from "./components/SummaryDashboard";
-import { calculateMoisturePct } from "@/lib/sensorUtils";
 import { analyzeDrainage, type DrainageInput } from "@/lib/drainageAnalysis";
 import { NodeSwitcher, type NodeSummary } from "./components/NodeSwitcher";
+import { calculateMoisturePct } from "@/lib/sensorUtils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ export interface TelemetryData {
   humidity_rh: number;
   pressure_hpa: number;
   soil_moisture_raw: number;
+  soil_moisture_pct?: number;
   battery_v: number | null;
   battery_pct: number | null;
   vpd_kpa?: number;
@@ -185,6 +187,7 @@ export function DashboardClient({
   vpdRollingAvg,
   vpdHistory7,
   moistureHistory,
+  deviceSettings,
   activeDeployment: initialActiveDeployment,
   deploymentHistory: initialDeploymentHistory,
   dailySummary,
@@ -199,7 +202,8 @@ export function DashboardClient({
   vpdHistory: VPDDataPoint[];
   vpdRollingAvg: number | null;
   vpdHistory7: VPDDataPoint[];
-  moistureHistory: { recorded_at: string; soil_moisture_raw: number }[];
+  moistureHistory: { recorded_at: string; soil_moisture_raw: number; soil_moisture_pct?: number }[];
+  deviceSettings: DeviceSettings | null;
   activeDeployment: Deployment | null;
   deploymentHistory: Deployment[];
   dailySummary: DailySummaryData;
@@ -267,9 +271,11 @@ export function DashboardClient({
 
   const latest = logs.length > 0 ? logs[0] : null;
 
-  // Derived values
+  // Derived values (uses soil_moisture_pct from DB trigger, or falls back to device calibration if migration is pending)
   const moisturePct = latest
-    ? calculateMoisturePct(latest.soil_moisture_raw)
+    ? (latest.soil_moisture_pct != null
+        ? latest.soil_moisture_pct
+        : calculateMoisturePct(latest.soil_moisture_raw, deviceSettings?.dry_limit, deviceSettings?.wet_limit))
     : null;
 
   const daysRemaining =
@@ -282,7 +288,9 @@ export function DashboardClient({
   // Phase 2.2: convert raw moisture history to calibrated % for drainage analysis
   const drainageData: DrainageInput[] = moistureHistory.map((r) => ({
     recorded_at: r.recorded_at,
-    moisture_pct: calculateMoisturePct(r.soil_moisture_raw),
+    moisture_pct: r.soil_moisture_pct != null
+      ? r.soil_moisture_pct
+      : calculateMoisturePct(r.soil_moisture_raw, deviceSettings?.dry_limit, deviceSettings?.wet_limit),
     raw: r.soil_moisture_raw,
   }));
 
@@ -311,7 +319,9 @@ export function DashboardClient({
   // Calibrated moisture for the TrialProgressCard
   const calibratedMoistureHistory = moistureHistory.map((r) => ({
     recorded_at: r.recorded_at,
-    moisture_pct: calculateMoisturePct(r.soil_moisture_raw),
+    moisture_pct: r.soil_moisture_pct != null
+      ? r.soil_moisture_pct
+      : calculateMoisturePct(r.soil_moisture_raw, deviceSettings?.dry_limit, deviceSettings?.wet_limit),
   }));
 
   // ── 5. Historical filtering for Sitter Mode and Microclimate Profile ──
@@ -376,6 +386,7 @@ export function DashboardClient({
             </div>
 
             <div className="flex items-center gap-3">
+              <CalibrationSettingsModal selectedDeviceId={selectedDeviceId} initialSettings={deviceSettings} />
               {latest && (
                 <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900/50 border border-zinc-800 rounded-full backdrop-blur-md">
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -486,7 +497,7 @@ export function DashboardClient({
                     {/* ── Phase 1.1: Calibrated Soil Moisture ── */}
                     <MetricCard
                       title="Soil Moisture"
-                      value={moisturePct !== null ? `${moisturePct.toFixed(1)}%` : "—"}
+                      value={moisturePct != null ? `${moisturePct.toFixed(1)}%` : "—"}
                       subtitle={`Raw ADC: ${latest.soil_moisture_raw}`}
                       icon={<Droplets className="w-5 h-5 text-emerald-400" />}
                       trend={null}
@@ -624,7 +635,9 @@ export function DashboardClient({
                     </thead>
                     <tbody className="divide-y divide-zinc-800/50">
                       {logs.map((log) => {
-                        const mPct = calculateMoisturePct(log.soil_moisture_raw);
+                        const mPct = log.soil_moisture_pct != null
+                          ? log.soil_moisture_pct
+                          : calculateMoisturePct(log.soil_moisture_raw, deviceSettings?.dry_limit, deviceSettings?.wet_limit);
                         return (
                           <tr key={log.id} className="hover:bg-zinc-800/30 transition-colors">
                             <td className="px-6 py-3 text-zinc-300 whitespace-nowrap">

@@ -117,25 +117,33 @@ async function handleRequest(req: Request) {
         : null;
 
       // 3. Fetch Moisture for piecewise drainage (30 days)
-      const { data: moistureRows } = await supabaseAdmin
+      const { data: moistureRows, error: moistureError } = await supabaseAdmin
         .from('telemetry')
-        .select('recorded_at, soil_moisture_raw')
+        .select('recorded_at, soil_moisture_raw, soil_moisture_pct')
         .eq('device_id', dId)
         .gte('recorded_at', thirtyDaysAgoIso)
         .lt('recorded_at', endOfYesterdayIso)
         .order('recorded_at', { ascending: true });
 
-      const drainageInput = (moistureRows || []).map(r => ({
-        recorded_at: r.recorded_at,
-        moisture_pct: r.soil_moisture_raw,
-      }));
+      let rawRows: { recorded_at: string; soil_moisture_raw: number; soil_moisture_pct?: number | null }[] | null = moistureRows;
+      if (moistureError) {
+        // Fallback if soil_moisture_pct column doesn't exist yet
+        const { data: fallbackM } = await supabaseAdmin
+          .from('telemetry')
+          .select('recorded_at, soil_moisture_raw')
+          .eq('device_id', dId)
+          .gte('recorded_at', thirtyDaysAgoIso)
+          .lt('recorded_at', endOfYesterdayIso)
+          .order('recorded_at', { ascending: true });
+        rawRows = fallbackM;
+      }
 
-      const calibratedMoisture = drainageInput.map(d => {
-        return {
-          recorded_at: d.recorded_at,
-          moisture_pct: calculateMoisturePct(d.moisture_pct), // d.moisture_pct is raw here
-        };
-      });
+      const calibratedMoisture = (rawRows || []).map((r) => ({
+        recorded_at: r.recorded_at,
+        moisture_pct: r.soil_moisture_pct != null
+          ? r.soil_moisture_pct
+          : calculateMoisturePct(r.soil_moisture_raw),
+      }));
 
       // 4. Extract 7-day subset for short-term profiling
       const moisture7d = calibratedMoisture.filter(d => 
