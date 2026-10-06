@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 // ── Types ──────────────────────────────────────────────────────────────────
 interface TelemetryPayload {
   device_id: string;
+  recorded_at?: string;  // Optional ISO 8601 timestamp emitted by node RTC/NTP
   illuminance_lux: number;
   temperature_c: number;
   humidity_rh: number;
@@ -14,13 +15,14 @@ interface TelemetryPayload {
 }
 
 // ── POST /api/telemetry ───────────────────────────────────────────────────
-// Ingests JSON telemetry pushed from the ESP32-C6 node and writes to Supabase.
+// Ingests JSON telemetry pushed from the ESP32 node and writes to Supabase.
 export async function POST(req: Request) {
   try {
     const payload: TelemetryPayload = await req.json();
 
     const {
       device_id,
+      recorded_at,
       illuminance_lux,
       temperature_c,
       humidity_rh,
@@ -40,12 +42,27 @@ export async function POST(req: Request) {
       soil_moisture_raw === undefined
     ) {
       return NextResponse.json(
-        { error: 'Invalid payload schema — all fields are required.' },
+        { error: 'Invalid payload schema — all required sensor fields must be present.' },
         { status: 400 }
       );
     }
 
+    let validRecordedAt: string | undefined = undefined;
+    if (recorded_at !== undefined && recorded_at !== null) {
+      const parsedDate = new Date(recorded_at);
+      if (isNaN(parsedDate.getTime())) {
+        return NextResponse.json(
+          { error: 'Invalid payload schema — recorded_at must be a valid ISO 8601 timestamp string.' },
+          { status: 400 }
+        );
+      }
+      validRecordedAt = parsedDate.toISOString();
+    }
+
     // ── Insert into Supabase ───────────────────────────────────────────────
+    // If recorded_at is provided by the node, persist that exact timestamp.
+    // If omitted (legacy firmware), fallback to server current time to ensure non-null recorded_at.
+    // created_at will automatically default to NOW() via PostgreSQL column default.
     const { data, error } = await supabaseAdmin.from('telemetry').insert([
       {
         device_id,
@@ -54,6 +71,7 @@ export async function POST(req: Request) {
         humidity_rh,
         pressure_hpa,
         soil_moisture_raw,
+        recorded_at: validRecordedAt ?? new Date().toISOString(),
         ...(battery_v !== undefined && { battery_v }),
         ...(battery_pct !== undefined && { battery_pct }),
       },

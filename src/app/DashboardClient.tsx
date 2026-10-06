@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useSyncExternalStore } from "react";
+import { useEffect, useState, useCallback, useMemo, useSyncExternalStore } from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
   Droplets,
@@ -35,7 +35,11 @@ import { SideNav } from "./components/SideNav";
 import { SummaryDashboard, type DailySummaryData } from "./components/SummaryDashboard";
 import { analyzeDrainage, type DrainageInput } from "@/lib/drainageAnalysis";
 import { NodeSwitcher, type NodeSummary } from "./components/NodeSwitcher";
+import { getNodeStatus } from "@/lib/nodeStatus";
 import { calculateMoisturePct } from "@/lib/sensorUtils";
+import { NightPhotoperiodCard } from "./components/NightPhotoperiodCard";
+import { UsableLightCard } from "./components/UsableLightCard";
+import { analyzePhotoperiod } from "@/lib/photoperiodAnalysis";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +47,7 @@ export interface TelemetryData {
   id: number;
   device_id: string;
   recorded_at: string;
+  created_at?: string;
   illuminance_lux: number;
   temperature_c: number;
   humidity_rh: number;
@@ -195,6 +200,7 @@ export function DashboardClient({
   selectedDeviceId,
   availableNodes,
   nodeSummaries,
+  lightHistory,
 }: {
   initialLogs: TelemetryData[];
   batteryHistory: BatterySnapshot[];
@@ -211,8 +217,10 @@ export function DashboardClient({
   selectedDeviceId: string;
   availableNodes: string[];
   nodeSummaries: NodeSummary[];
+  lightHistory?: { recorded_at: string; illuminance_lux: number }[];
 }) {
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
+  const [lightReadings, setLightReadings] = useState<{ recorded_at: string; illuminance_lux: number }[]>(lightHistory || []);
   const [currentDeployment, setCurrentDeployment] = useState<Deployment | null>(initialActiveDeployment);
   const [allDeployments, setAllDeployments] = useState<Deployment[]>(initialDeploymentHistory);
   const [summaries, setSummaries] = useState<NodeSummary[]>(nodeSummaries);
@@ -244,6 +252,10 @@ export function DashboardClient({
               if (current.some((l) => l.id === newLog.id)) return current;
               return [newLog, ...current].slice(0, 50);
             });
+            setLightReadings((prev) => [
+              ...prev,
+              { recorded_at: newLog.recorded_at, illuminance_lux: newLog.illuminance_lux },
+            ]);
           }
 
           // Update node summaries in the switcher in real time
@@ -252,7 +264,7 @@ export function DashboardClient({
               s.nodeId === newLog.device_id
                 ? {
                     ...s,
-                    status: "online",
+                    status: getNodeStatus(newLog.recorded_at),
                     lastSeen: newLog.recorded_at,
                     latestTemp: newLog.temperature_c,
                     latestHumidity: newLog.humidity_rh,
@@ -268,6 +280,26 @@ export function DashboardClient({
       supabase.removeChannel(channel);
     };
   }, [supabase, selectedDeviceId]);
+
+  // Sync summaries when server props change (e.g., node navigation)
+  const [prevNodeSummaries, setPrevNodeSummaries] = useState(nodeSummaries);
+  if (nodeSummaries !== prevNodeSummaries) {
+    setPrevNodeSummaries(nodeSummaries);
+    setSummaries(nodeSummaries);
+  }
+
+  // Periodic ticker (30s) to transition nodes between Live, Idle, and Offline over time
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSummaries((prev) =>
+        prev.map((s) => ({
+          ...s,
+          status: getNodeStatus(s.lastSeen),
+        }))
+      );
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   const latest = logs.length > 0 ? logs[0] : null;
 
@@ -343,6 +375,17 @@ export function DashboardClient({
   // Calculate overall viability status
   const currentPlantType = currentDeployment?.plant_type || null;
   const isPot = placementType === "pot";
+
+  // Photoperiod & Usable Light Dynamics
+  const activeLightData = useMemo(() => {
+    if (lightReadings.length > 0) return lightReadings;
+    return logs.map((l) => ({ recorded_at: l.recorded_at, illuminance_lux: l.illuminance_lux }));
+  }, [lightReadings, logs]);
+
+  const photoperiodResult = useMemo(() => {
+    return analyzePhotoperiod(activeLightData, currentPlantType, placementType);
+  }, [activeLightData, currentPlantType, placementType]);
+
   const drainageResult = analyzeDrainage(historicalDrainageData, currentPlantType);
   const rot = evalRotWarning(historicalDrainageData, historicalVpd, historicalLatestMoisture, isPot, currentPlantType, piecewiseResult);
   const dehy = evalDehydrationWarning(historicalDrainageData, historicalVpd, historicalLatestMoisture, isPot, currentPlantType, piecewiseResult);
@@ -353,6 +396,11 @@ export function DashboardClient({
   const isOptimal = growth.status === "active";
 
   const viabilityStatus = hasActiveThreat ? "critical" : hasRisk ? "warning" : isOptimal ? "optimal" : "monitoring";
+
+  const selectedSummary = summaries.find((s) => s.nodeId === selectedDeviceId);
+  const selectedStatus =
+    selectedSummary?.status ??
+    (latest ? getNodeStatus(latest.recorded_at) : "offline");
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-emerald-500/30 font-sans">
@@ -389,7 +437,15 @@ export function DashboardClient({
               <CalibrationSettingsModal selectedDeviceId={selectedDeviceId} initialSettings={deviceSettings} />
               {latest && (
                 <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900/50 border border-zinc-800 rounded-full backdrop-blur-md">
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <div
+                    className={`w-2.5 h-2.5 rounded-full ${
+                      selectedStatus === "online"
+                        ? "bg-emerald-400 animate-pulse ring-2 ring-emerald-400/20"
+                        : selectedStatus === "idle"
+                        ? "bg-amber-400 ring-2 ring-amber-400/20"
+                        : "bg-zinc-500"
+                    }`}
+                  />
                   <span className="text-sm font-medium text-zinc-300">
                     {mounted ? formatDistanceToNow(new Date(latest.recorded_at), { addSuffix: true }) : "..."}
                   </span>
@@ -459,6 +515,7 @@ export function DashboardClient({
                   plantType={currentPlantType}
                   drainageData={historicalDrainageData}
                   piecewiseResult={piecewiseResult}
+                  photoperiodResult={photoperiodResult}
                 />
 
                 {/* Metrics Grid */}
@@ -596,6 +653,12 @@ export function DashboardClient({
 
                 {/* 2.1 — Daily Light Integral */}
                 <DLIChart data={dliHistory} />
+
+                {/* 2.15 — Photoperiod Dynamics: Dark Cycle & Usable Light */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <NightPhotoperiodCard photoperiod={photoperiodResult} />
+                  <UsableLightCard photoperiod={photoperiodResult} placementType={placementType} />
+                </div>
 
                 {/* 2-col row: VPD trend + Drainage */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
