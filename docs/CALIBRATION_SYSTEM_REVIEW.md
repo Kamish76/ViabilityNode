@@ -198,21 +198,21 @@ However, a rigorous review of the current uncommitted changes, existing code pat
 
 ## 4. Remediation Checklist
 
-- [ ] **1. Update Migration Script (`supabase/migrations/20261006141100_dynamic_calibration.sql`)**:
+- [x] **1. Update Migration Script (`supabase/migrations/20261006141100_dynamic_calibration.sql`)**:
   - Replace `uuid_generate_v4()` with `gen_random_uuid()`.
   - Add `IF NEW.soil_moisture_pct IS NULL` guard to `set_calibrated_moisture()`.
   - Add `d_limit <= w_limit` sanity check in `set_calibrated_moisture()`.
   - Add `telemetry_with_moisture` view recreation.
-- [ ] **2. Enhance `CalibrationSettingsModal.tsx`**:
+- [x] **2. Enhance `CalibrationSettingsModal.tsx`**:
   - Add input range validation (`0 <= wetLimit < dryLimit <= 4095`).
   - Reset state when modal opens.
   - Type `initialSettings` properly instead of `any`.
-- [ ] **3. Update `src/app/page.tsx`**:
+- [x] **3. Update `src/app/page.tsx`**:
   - Replace `.single()` with `.maybeSingle()` for `device_settings` and `node_microclimates`.
-- [ ] **4. Harden `SummaryDashboard.tsx`**:
+- [x] **4. Harden `SummaryDashboard.tsx`**:
   - Add null guards for `data.current.moisturePct`.
-- [ ] **5. Clean Up**:
-  - Remove stale `src/lib/sensorUtils.js`.
+- [x] **5. Clean Up**:
+  - Remove stale `src/lib/sensorUtils.js` and `piecewiseDrainage.js`.
 - [ ] **6. Apply Migration in Remote Supabase**:
   - Run the updated SQL script in the **Supabase Dashboard SQL Editor** (NO Docker CLI).
 

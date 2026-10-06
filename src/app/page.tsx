@@ -263,7 +263,7 @@ export default async function DashboardPage(props: {
     .from("node_microclimates")
     .select("*")
     .eq("device_id", selectedDeviceId)
-    .single();
+    .maybeSingle();
 
   if (profileData) {
     microclimateProfile = profileData as PrecalculatedProfile;
@@ -276,7 +276,7 @@ export default async function DashboardPage(props: {
     .from("device_settings")
     .select("*")
     .eq("device_id", selectedDeviceId)
-    .single();
+    .maybeSingle();
   
   if (settingsData) {
     deviceSettings = settingsData;

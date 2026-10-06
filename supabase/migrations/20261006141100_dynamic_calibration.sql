@@ -6,7 +6,7 @@
 
 -- 1. Create a table to trail calibration changes
 CREATE TABLE IF NOT EXISTS public.calibration_history (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_id TEXT NOT NULL,
     dry_limit INTEGER NOT NULL,
     wet_limit INTEGER NOT NULL,
@@ -53,7 +53,7 @@ SET soil_moisture_pct = ROUND(
         ((1920.0 - soil_moisture_raw) / (1920.0 - 880.0)) * 100.0
     ))::NUMERIC, 2
 )
-WHERE soil_moisture_pct IS NULL;
+WHERE soil_moisture_pct IS NULL AND soil_moisture_raw IS NOT NULL;
 
 -- 5. Create a trigger to calculate moisture pct dynamically on future inserts
 CREATE OR REPLACE FUNCTION set_calibrated_moisture()
@@ -64,22 +64,26 @@ DECLARE
   d_limit NUMERIC;
   w_limit NUMERIC;
 BEGIN
-  -- Fetch current calibration for this specific node
-  SELECT dry_limit, wet_limit INTO d_limit, w_limit 
-  FROM public.device_settings 
-  WHERE device_id = NEW.device_id;
-  
-  -- Fallback defaults to 1920/880 if no settings found
-  d_limit := COALESCE(d_limit, 1920); 
-  w_limit := COALESCE(w_limit, 880);
-  
-  IF d_limit = w_limit THEN
-    NEW.soil_moisture_pct := 0;
-  ELSE
-    NEW.soil_moisture_pct := ROUND(
-        GREATEST(0.0, LEAST(100.0, ((d_limit - NEW.soil_moisture_raw) / (d_limit - w_limit)) * 100.0))::NUMERIC, 
-        2
-    );
+  -- Only calculate if soil_moisture_pct is not already provided and raw reading exists
+  IF NEW.soil_moisture_pct IS NULL AND NEW.soil_moisture_raw IS NOT NULL THEN
+    -- Fetch current calibration for this specific node
+    SELECT dry_limit, wet_limit INTO d_limit, w_limit 
+    FROM public.device_settings 
+    WHERE device_id = NEW.device_id;
+    
+    -- Fallback defaults to 1920/880 if no settings found
+    d_limit := COALESCE(d_limit, 1920); 
+    w_limit := COALESCE(w_limit, 880);
+    
+    -- Sanity check: dry_limit must be strictly greater than wet_limit
+    IF d_limit <= w_limit THEN
+      NEW.soil_moisture_pct := 0;
+    ELSE
+      NEW.soil_moisture_pct := ROUND(
+          GREATEST(0.0, LEAST(100.0, ((d_limit - NEW.soil_moisture_raw) / (d_limit - w_limit)) * 100.0))::NUMERIC, 
+          2
+      );
+    END IF;
   END IF;
   
   RETURN NEW;
@@ -106,6 +110,21 @@ SELECT
         )::NUMERIC,
         3
     ) AS vpd_kpa
+FROM public.telemetry;
+
+DROP VIEW IF EXISTS public.telemetry_with_moisture;
+CREATE OR REPLACE VIEW public.telemetry_with_moisture AS
+SELECT
+    *,
+    soil_moisture_pct AS moisture_pct,
+    ROUND(
+        GREATEST(0.0,
+            (0.61078 * EXP((17.27 * (temperature_c + CASE WHEN illuminance_lux > 1000 THEN -2.0 ELSE 0.0 END)) / ((temperature_c + CASE WHEN illuminance_lux > 1000 THEN -2.0 ELSE 0.0 END) + 237.3)))
+            -
+            (0.61078 * EXP((17.27 * temperature_c) / (temperature_c + 237.3)) * (humidity_rh / 100.0))
+        )::NUMERIC,
+        3
+    ) AS vpd_kpa_calc
 FROM public.telemetry;
 
 DROP VIEW IF EXISTS public.daily_telemetry_summary;

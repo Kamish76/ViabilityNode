@@ -5,9 +5,17 @@ import { useRouter } from "next/navigation";
 import { Settings, X, Save, AlertCircle } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 
+export interface DeviceSettings {
+  device_id?: string;
+  dry_limit?: number;
+  wet_limit?: number;
+  plant_type?: string | null;
+  placement_type?: string | null;
+}
+
 interface CalibrationSettingsModalProps {
   selectedDeviceId: string;
-  initialSettings: any;
+  initialSettings?: DeviceSettings | null;
 }
 
 export function CalibrationSettingsModal({ selectedDeviceId, initialSettings }: CalibrationSettingsModalProps) {
@@ -20,6 +28,13 @@ export function CalibrationSettingsModal({ selectedDeviceId, initialSettings }: 
 
   const supabase = createClient();
 
+  const handleOpen = () => {
+    setDryLimit(initialSettings?.dry_limit?.toString() || "1920");
+    setWetLimit(initialSettings?.wet_limit?.toString() || "880");
+    setSaveMessage(null);
+    setIsOpen(true);
+  };
+
   const handleSave = async () => {
     setIsSaving(true);
     setSaveMessage(null);
@@ -28,6 +43,14 @@ export function CalibrationSettingsModal({ selectedDeviceId, initialSettings }: 
       const parsedWet = parseInt(wetLimit, 10);
       if (isNaN(parsedDry) || isNaN(parsedWet)) {
         throw new Error("Please enter valid numeric values for limits.");
+      }
+
+      if (parsedDry <= parsedWet) {
+        throw new Error("Dry Limit (air ADC) must be strictly greater than Wet Limit (water ADC).");
+      }
+
+      if (parsedDry < 0 || parsedDry > 4095 || parsedWet < 0 || parsedWet > 4095) {
+        throw new Error("ADC limits must be within the 12-bit ADC range (0 - 4095).");
       }
 
       const { error } = await supabase
@@ -51,10 +74,12 @@ export function CalibrationSettingsModal({ selectedDeviceId, initialSettings }: 
       }
       setSaveMessage({ type: 'success', text: 'Calibration updated successfully.' });
       router.refresh();
-      setTimeout(() => setIsOpen(false), 1500);
+      setTimeout(() => {
+        setIsOpen(false);
+        setIsSaving(false);
+      }, 1500);
     } catch (err: any) {
       setSaveMessage({ type: 'error', text: err.message || 'Failed to save settings.' });
-    } finally {
       setIsSaving(false);
     }
   };
@@ -62,7 +87,7 @@ export function CalibrationSettingsModal({ selectedDeviceId, initialSettings }: 
   return (
     <>
       <button
-        onClick={() => { setIsOpen(true); setSaveMessage(null); }}
+        onClick={handleOpen}
         className="flex items-center gap-2 px-4 py-2 bg-zinc-900/50 border border-zinc-800 rounded-full backdrop-blur-md hover:bg-zinc-800/80 transition-colors"
       >
         <Settings className="w-4 h-4 text-zinc-400" />
@@ -77,7 +102,11 @@ export function CalibrationSettingsModal({ selectedDeviceId, initialSettings }: 
                 <Settings className="w-5 h-5 text-emerald-400" />
                 Node Calibration
               </h2>
-              <button onClick={() => setIsOpen(false)} className="p-1 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors">
+              <button 
+                onClick={() => !isSaving && setIsOpen(false)} 
+                disabled={isSaving}
+                className="p-1 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-50"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -93,6 +122,8 @@ export function CalibrationSettingsModal({ selectedDeviceId, initialSettings }: 
                   <label className="block text-sm font-medium text-zinc-300 mb-1.5">Dry Limit (Air)</label>
                   <input
                     type="number"
+                    min={0}
+                    max={4095}
                     value={dryLimit}
                     onChange={(e) => setDryLimit(e.target.value)}
                     className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 transition-all font-mono"
@@ -104,6 +135,8 @@ export function CalibrationSettingsModal({ selectedDeviceId, initialSettings }: 
                   <label className="block text-sm font-medium text-zinc-300 mb-1.5">Wet Limit (Water)</label>
                   <input
                     type="number"
+                    min={0}
+                    max={4095}
                     value={wetLimit}
                     onChange={(e) => setWetLimit(e.target.value)}
                     className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 transition-all font-mono"
