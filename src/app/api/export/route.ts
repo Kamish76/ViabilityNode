@@ -23,24 +23,25 @@ interface DaySummary {
 
 function computeDayAvg(rows: Record<string, unknown>[]): DaySummary | null {
   if (rows.length === 0) return null;
-  let temp = 0, hum = 0, vpd = 0, lux = 0, moisture = 0;
+  let temp = 0, hum = 0, vpd = 0, lux = 0, moisturePctSum = 0;
   for (const r of rows) {
-    temp += r.temperature_c as number;
-    hum += r.humidity_rh as number;
-    lux += r.illuminance_lux as number;
-    moisture += r.soil_moisture_raw as number;
-    const eSat = 0.61078 * Math.exp((17.27 * (r.temperature_c as number)) / ((r.temperature_c as number) + 237.3));
-    vpd += eSat * (1 - (r.humidity_rh as number) / 100);
+    temp += (r.temperature_c as number) ?? 0;
+    hum += (r.humidity_rh as number) ?? 0;
+    lux += (r.illuminance_lux as number) ?? 0;
+    const mPct = r.soil_moisture_pct != null
+      ? (r.soil_moisture_pct as number)
+      : calculateMoisturePct(r.soil_moisture_raw as number);
+    moisturePctSum += mPct;
+    const eSat = 0.61078 * Math.exp((17.27 * ((r.temperature_c as number) ?? 0)) / (((r.temperature_c as number) ?? 0) + 237.3));
+    vpd += eSat * (1 - ((r.humidity_rh as number) ?? 0) / 100);
   }
-  const avgMoistureRaw = moisture / rows.length;
-  const moisturePct = calculateMoisturePct(avgMoistureRaw);
 
   return {
     temp: +(temp / rows.length).toFixed(2),
     humidity: +(hum / rows.length).toFixed(2),
     vpd: +(vpd / rows.length).toFixed(3),
     light: +(lux / rows.length).toFixed(2),
-    moisture_pct: +moisturePct.toFixed(1),
+    moisture_pct: +(moisturePctSum / rows.length).toFixed(1),
   };
 }
 
@@ -128,8 +129,8 @@ export async function GET(req: Request) {
 
       // Moisture with calibrated % (last 30 days, up to 5000 rows)
       supabaseAdmin
-        .from('telemetry_with_moisture')
-        .select('recorded_at, soil_moisture_raw, moisture_pct, vpd_kpa_calc')
+        .from('telemetry')
+        .select('recorded_at, soil_moisture_raw, soil_moisture_pct')
         .eq('device_id', deviceId)
         .gte('recorded_at', thirtyDaysIso)
         .order('recorded_at', { ascending: false })
@@ -138,7 +139,7 @@ export async function GET(req: Request) {
       // Recent telemetry for today/yesterday summary
       supabaseAdmin
         .from('telemetry')
-        .select('recorded_at, temperature_c, humidity_rh, illuminance_lux, soil_moisture_raw')
+        .select('recorded_at, temperature_c, humidity_rh, illuminance_lux, soil_moisture_raw, soil_moisture_pct')
         .eq('device_id', deviceId)
         .gte('recorded_at', new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString())
         .order('recorded_at', { ascending: false }),
@@ -182,9 +183,27 @@ export async function GET(req: Request) {
     let moisture = null;
     if (moistureResult.status === 'fulfilled') {
       if (moistureResult.value.error) {
-        errors.push(`moisture: ${moistureResult.value.error.message}`);
+        // Fallback without soil_moisture_pct if migration not yet applied
+        const { data: fallbackM } = await supabaseAdmin
+          .from('telemetry')
+          .select('recorded_at, soil_moisture_raw')
+          .eq('device_id', deviceId)
+          .gte('recorded_at', thirtyDaysIso)
+          .order('recorded_at', { ascending: false })
+          .limit(5000);
+        if (fallbackM) {
+          moisture = fallbackM.map((r: any) => ({
+            ...r,
+            soil_moisture_pct: calculateMoisturePct(r.soil_moisture_raw),
+          }));
+        } else {
+          errors.push(`moisture: ${moistureResult.value.error.message}`);
+        }
       } else {
-        moisture = moistureResult.value.data;
+        moisture = (moistureResult.value.data || []).map((r: any) => ({
+          ...r,
+          soil_moisture_pct: r.soil_moisture_pct != null ? r.soil_moisture_pct : calculateMoisturePct(r.soil_moisture_raw),
+        }));
       }
     } else {
       errors.push(`moisture: ${moistureResult.reason}`);
@@ -197,8 +216,18 @@ export async function GET(req: Request) {
       yesterday: null,
     };
 
-    if (summaryResult.status === 'fulfilled' && !summaryResult.value.error) {
-      const rows = summaryResult.value.data ?? [];
+    if (summaryResult.status === 'fulfilled') {
+      let rows: Record<string, unknown>[] = (summaryResult.value.data as Record<string, unknown>[]) ?? [];
+      if (summaryResult.value.error) {
+        // Fallback without soil_moisture_pct if column doesn't exist
+        const { data: fallbackRows } = await supabaseAdmin
+          .from('telemetry')
+          .select('recorded_at, temperature_c, humidity_rh, illuminance_lux, soil_moisture_raw')
+          .eq('device_id', deviceId)
+          .gte('recorded_at', new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString())
+          .order('recorded_at', { ascending: false });
+        rows = (fallbackRows as Record<string, unknown>[]) ?? [];
+      }
       const now = new Date();
       const todayStr = now.toISOString().slice(0, 10);
       const yesterday = new Date(now);
@@ -218,7 +247,7 @@ export async function GET(req: Request) {
       };
     } else {
       errors.push(
-        `summary: ${summaryResult.status === 'fulfilled' ? summaryResult.value.error?.message : summaryResult.reason}`
+        `summary: ${summaryResult.reason}`
       );
     }
 
