@@ -179,6 +179,22 @@ export default async function DashboardPage(props: {
     dliHistory = (dliRows ?? []) as DLIDataPoint[];
   }
 
+  // ── 4.5. Light telemetry history for photoperiod analysis (last 7 days) ───
+  let lightHistory: { recorded_at: string; illuminance_lux: number }[] = [];
+  const { data: lightRows, error: lightError } = await supabaseAdmin
+    .from("telemetry")
+    .select("recorded_at, illuminance_lux")
+    .eq("device_id", selectedDeviceId)
+    .gte("recorded_at", sevenDaysAgo.toISOString())
+    .order("recorded_at", { ascending: true })
+    .limit(3000);
+
+  if (lightError) {
+    console.warn("Failed to fetch light history from telemetry:", lightError.message);
+  } else {
+    lightHistory = (lightRows ?? []) as { recorded_at: string; illuminance_lux: number }[];
+  }
+
   // ── 5. Phase 2.3: 7-day rolling VPD ──────────────────────────────────────
   let vpdHistory: VPDDataPoint[] = [];
   const { data: vpdRows, error: vpdError } = await supabaseAdmin
@@ -300,6 +316,7 @@ export default async function DashboardPage(props: {
       selectedDeviceId={selectedDeviceId}
       availableNodes={availableNodes}
       nodeSummaries={nodeSummaries}
+      lightHistory={lightHistory}
     />
   );
 }

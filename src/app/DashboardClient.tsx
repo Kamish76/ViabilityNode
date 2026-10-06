@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useSyncExternalStore } from "react";
+import { useEffect, useState, useCallback, useMemo, useSyncExternalStore } from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
   Droplets,
@@ -36,6 +36,9 @@ import { SummaryDashboard, type DailySummaryData } from "./components/SummaryDas
 import { analyzeDrainage, type DrainageInput } from "@/lib/drainageAnalysis";
 import { NodeSwitcher, type NodeSummary } from "./components/NodeSwitcher";
 import { calculateMoisturePct } from "@/lib/sensorUtils";
+import { NightPhotoperiodCard } from "./components/NightPhotoperiodCard";
+import { UsableLightCard } from "./components/UsableLightCard";
+import { analyzePhotoperiod } from "@/lib/photoperiodAnalysis";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -195,6 +198,7 @@ export function DashboardClient({
   selectedDeviceId,
   availableNodes,
   nodeSummaries,
+  lightHistory,
 }: {
   initialLogs: TelemetryData[];
   batteryHistory: BatterySnapshot[];
@@ -211,8 +215,10 @@ export function DashboardClient({
   selectedDeviceId: string;
   availableNodes: string[];
   nodeSummaries: NodeSummary[];
+  lightHistory?: { recorded_at: string; illuminance_lux: number }[];
 }) {
   const [logs, setLogs] = useState<TelemetryData[]>(initialLogs);
+  const [lightReadings, setLightReadings] = useState<{ recorded_at: string; illuminance_lux: number }[]>(lightHistory || []);
   const [currentDeployment, setCurrentDeployment] = useState<Deployment | null>(initialActiveDeployment);
   const [allDeployments, setAllDeployments] = useState<Deployment[]>(initialDeploymentHistory);
   const [summaries, setSummaries] = useState<NodeSummary[]>(nodeSummaries);
@@ -244,6 +250,10 @@ export function DashboardClient({
               if (current.some((l) => l.id === newLog.id)) return current;
               return [newLog, ...current].slice(0, 50);
             });
+            setLightReadings((prev) => [
+              ...prev,
+              { recorded_at: newLog.recorded_at, illuminance_lux: newLog.illuminance_lux },
+            ]);
           }
 
           // Update node summaries in the switcher in real time
@@ -343,6 +353,17 @@ export function DashboardClient({
   // Calculate overall viability status
   const currentPlantType = currentDeployment?.plant_type || null;
   const isPot = placementType === "pot";
+
+  // Photoperiod & Usable Light Dynamics
+  const activeLightData = useMemo(() => {
+    if (lightReadings.length > 0) return lightReadings;
+    return logs.map((l) => ({ recorded_at: l.recorded_at, illuminance_lux: l.illuminance_lux }));
+  }, [lightReadings, logs]);
+
+  const photoperiodResult = useMemo(() => {
+    return analyzePhotoperiod(activeLightData, currentPlantType, placementType);
+  }, [activeLightData, currentPlantType, placementType]);
+
   const drainageResult = analyzeDrainage(historicalDrainageData, currentPlantType);
   const rot = evalRotWarning(historicalDrainageData, historicalVpd, historicalLatestMoisture, isPot, currentPlantType, piecewiseResult);
   const dehy = evalDehydrationWarning(historicalDrainageData, historicalVpd, historicalLatestMoisture, isPot, currentPlantType, piecewiseResult);
@@ -459,6 +480,7 @@ export function DashboardClient({
                   plantType={currentPlantType}
                   drainageData={historicalDrainageData}
                   piecewiseResult={piecewiseResult}
+                  photoperiodResult={photoperiodResult}
                 />
 
                 {/* Metrics Grid */}
@@ -596,6 +618,12 @@ export function DashboardClient({
 
                 {/* 2.1 — Daily Light Integral */}
                 <DLIChart data={dliHistory} />
+
+                {/* 2.15 — Photoperiod Dynamics: Dark Cycle & Usable Light */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <NightPhotoperiodCard photoperiod={photoperiodResult} />
+                  <UsableLightCard photoperiod={photoperiodResult} placementType={placementType} />
+                </div>
 
                 {/* 2-col row: VPD trend + Drainage */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
