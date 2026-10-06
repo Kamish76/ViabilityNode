@@ -192,7 +192,8 @@ export async function GET(req: Request) {
           .order('recorded_at', { ascending: false })
           .limit(5000);
         if (fallbackM) {
-          moisture = fallbackM.map((r: any) => ({
+          const fallbackRows = fallbackM as Array<{ recorded_at: string; soil_moisture_raw: number }>;
+          moisture = fallbackRows.map((r) => ({
             ...r,
             soil_moisture_pct: calculateMoisturePct(r.soil_moisture_raw),
           }));
@@ -200,7 +201,8 @@ export async function GET(req: Request) {
           errors.push(`moisture: ${moistureResult.value.error.message}`);
         }
       } else {
-        moisture = (moistureResult.value.data || []).map((r: any) => ({
+        const rows = (moistureResult.value.data || []) as Array<{ recorded_at: string; soil_moisture_raw: number; soil_moisture_pct?: number | null }>;
+        moisture = rows.map((r) => ({
           ...r,
           soil_moisture_pct: r.soil_moisture_pct != null ? r.soil_moisture_pct : calculateMoisturePct(r.soil_moisture_raw),
         }));

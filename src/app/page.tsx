@@ -234,9 +234,9 @@ export default async function DashboardPage(props: {
     rawMoistureData = fallbackRows;
   }
 
-  moistureHistory = (rawMoistureData ?? []).reverse().map((r: any) => ({
-    recorded_at: r.recorded_at as string,
-    soil_moisture_raw: r.soil_moisture_raw as number,
+  moistureHistory = (rawMoistureData ?? []).reverse().map((r) => ({
+    recorded_at: r.recorded_at,
+    soil_moisture_raw: r.soil_moisture_raw,
     soil_moisture_pct: r.soil_moisture_pct != null ? (r.soil_moisture_pct as number) : undefined,
   }));
 

@@ -138,7 +138,7 @@ async function handleRequest(req: Request) {
         rawRows = fallbackM;
       }
 
-      const calibratedMoisture = (rawRows || []).map((r: any) => ({
+      const calibratedMoisture = (rawRows || []).map((r) => ({
         recorded_at: r.recorded_at,
         moisture_pct: r.soil_moisture_pct != null
           ? r.soil_moisture_pct

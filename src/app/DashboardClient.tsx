@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { DLIChart, type DLIDataPoint } from "./components/DLIChart";
-import { CalibrationSettingsModal } from "./components/CalibrationSettingsModal";
+import { CalibrationSettingsModal, type DeviceSettings } from "./components/CalibrationSettingsModal";
 import { VPDChart, type VPDDataPoint } from "./components/VPDChart";
 import { AtmosphericCorrelationChart } from "./components/AtmosphericCorrelationChart";
 import { DrainageCard } from "./components/DrainageCard";
@@ -203,7 +203,7 @@ export function DashboardClient({
   vpdRollingAvg: number | null;
   vpdHistory7: VPDDataPoint[];
   moistureHistory: { recorded_at: string; soil_moisture_raw: number; soil_moisture_pct?: number }[];
-  deviceSettings: any;
+  deviceSettings: DeviceSettings | null;
   activeDeployment: Deployment | null;
   deploymentHistory: Deployment[];
   dailySummary: DailySummaryData;

@@ -78,8 +78,9 @@ export function CalibrationSettingsModal({ selectedDeviceId, initialSettings }: 
         setIsOpen(false);
         setIsSaving(false);
       }, 1500);
-    } catch (err: any) {
-      setSaveMessage({ type: 'error', text: err.message || 'Failed to save settings.' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to save settings.';
+      setSaveMessage({ type: 'error', text: message });
       setIsSaving(false);
     }
   };
