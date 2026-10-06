@@ -47,6 +47,7 @@ export interface TelemetryData {
   id: number;
   device_id: string;
   recorded_at: string;
+  created_at?: string;
   illuminance_lux: number;
   temperature_c: number;
   humidity_rh: number;
