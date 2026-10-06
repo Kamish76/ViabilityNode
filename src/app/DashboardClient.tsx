@@ -35,6 +35,7 @@ import { SideNav } from "./components/SideNav";
 import { SummaryDashboard, type DailySummaryData } from "./components/SummaryDashboard";
 import { analyzeDrainage, type DrainageInput } from "@/lib/drainageAnalysis";
 import { NodeSwitcher, type NodeSummary } from "./components/NodeSwitcher";
+import { getNodeStatus } from "@/lib/nodeStatus";
 import { calculateMoisturePct } from "@/lib/sensorUtils";
 import { NightPhotoperiodCard } from "./components/NightPhotoperiodCard";
 import { UsableLightCard } from "./components/UsableLightCard";
@@ -262,7 +263,7 @@ export function DashboardClient({
               s.nodeId === newLog.device_id
                 ? {
                     ...s,
-                    status: "online",
+                    status: getNodeStatus(newLog.recorded_at),
                     lastSeen: newLog.recorded_at,
                     latestTemp: newLog.temperature_c,
                     latestHumidity: newLog.humidity_rh,
@@ -278,6 +279,26 @@ export function DashboardClient({
       supabase.removeChannel(channel);
     };
   }, [supabase, selectedDeviceId]);
+
+  // Sync summaries when server props change (e.g., node navigation)
+  const [prevNodeSummaries, setPrevNodeSummaries] = useState(nodeSummaries);
+  if (nodeSummaries !== prevNodeSummaries) {
+    setPrevNodeSummaries(nodeSummaries);
+    setSummaries(nodeSummaries);
+  }
+
+  // Periodic ticker (30s) to transition nodes between Live, Idle, and Offline over time
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSummaries((prev) =>
+        prev.map((s) => ({
+          ...s,
+          status: getNodeStatus(s.lastSeen),
+        }))
+      );
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   const latest = logs.length > 0 ? logs[0] : null;
 
@@ -375,6 +396,11 @@ export function DashboardClient({
 
   const viabilityStatus = hasActiveThreat ? "critical" : hasRisk ? "warning" : isOptimal ? "optimal" : "monitoring";
 
+  const selectedSummary = summaries.find((s) => s.nodeId === selectedDeviceId);
+  const selectedStatus =
+    selectedSummary?.status ??
+    (latest ? getNodeStatus(latest.recorded_at) : "offline");
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-emerald-500/30 font-sans">
       {/* Background gradients */}
@@ -410,7 +436,15 @@ export function DashboardClient({
               <CalibrationSettingsModal selectedDeviceId={selectedDeviceId} initialSettings={deviceSettings} />
               {latest && (
                 <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900/50 border border-zinc-800 rounded-full backdrop-blur-md">
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <div
+                    className={`w-2.5 h-2.5 rounded-full ${
+                      selectedStatus === "online"
+                        ? "bg-emerald-400 animate-pulse ring-2 ring-emerald-400/20"
+                        : selectedStatus === "idle"
+                        ? "bg-amber-400 ring-2 ring-amber-400/20"
+                        : "bg-zinc-500"
+                    }`}
+                  />
                   <span className="text-sm font-medium text-zinc-300">
                     {mounted ? formatDistanceToNow(new Date(latest.recorded_at), { addSuffix: true }) : "..."}
                   </span>

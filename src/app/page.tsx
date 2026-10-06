@@ -6,6 +6,7 @@ import type { VPDDataPoint } from "./components/VPDChart";
 import type { Deployment } from "./components/DeploymentPanel";
 import type { PrecalculatedProfile } from "./components/MicroclimatProfileCard";
 import type { NodeSummary } from "./components/NodeSwitcher";
+import { getNodeStatus } from "@/lib/nodeStatus";
 
 // Opt out of static rendering so we fetch fresh data on reload
 export const dynamic = "force-dynamic";
@@ -45,15 +46,7 @@ export default async function DashboardPage(props: {
     );
     const lastSeen = latestReading?.recorded_at ?? null;
 
-    let status: "online" | "idle" | "offline" = "offline";
-    if (lastSeen) {
-      const ageMs = Date.now() - new Date(lastSeen).getTime();
-      if (ageMs < 15 * 60 * 1000) {
-        status = "online";
-      } else if (ageMs < 24 * 60 * 60 * 1000) {
-        status = "idle";
-      }
-    }
+    const status = getNodeStatus(lastSeen);
 
     return {
       nodeId: id,
